@@ -18,7 +18,31 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
-app.use(express.static('public'));
+
+// Force authenticated dashboard pages to revalidate every navigation (including
+// browser Back/Forward) so a logged-out user can't see a cached dashboard.
+app.use((req, res, next) => {
+  const accept = String(req.headers.accept || '');
+  const isHtmlNav =
+    req.method === 'GET' &&
+    (accept.includes('text/html') || /\.html?$/.test(req.path));
+  if (isHtmlNav) {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+  }
+  next();
+});
+
+app.use(express.static('public', {
+  setHeaders: (res, filePath) => {
+    if (/\.html?$/.test(filePath)) {
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
+    }
+  },
+}));
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'GIMS API running' });

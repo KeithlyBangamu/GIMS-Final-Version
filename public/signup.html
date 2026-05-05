@@ -9,6 +9,7 @@
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap"></noscript>
     <link rel="stylesheet" href="/css/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
       .signup-step2 { position: relative; transition: opacity 0.25s ease, filter 0.25s ease; }
       .signup-step2.is-locked {
@@ -34,9 +35,71 @@
         vertical-align: middle;
       }
       .signup-step2.is-locked .signup-step2-lock-badge { display: inline-flex; }
+
+      .signup-error-popup {
+        position: fixed;
+        top: 1.2rem;
+        right: 1.2rem;
+        z-index: 9999;
+        max-width: min(420px, calc(100vw - 2rem));
+        background: #fef2f2;
+        border: 1px solid #dc2626;
+        color: #7f1d1d;
+        border-radius: 0.6rem;
+        box-shadow: 0 12px 32px rgba(127, 29, 29, 0.18);
+        padding: 0.85rem 2.4rem 0.85rem 1rem;
+        font-size: 0.92rem;
+        font-weight: 500;
+        opacity: 0;
+        transform: translateY(-8px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        pointer-events: none;
+      }
+      .signup-error-popup.is-visible {
+        opacity: 1;
+        transform: translateY(0);
+        pointer-events: auto;
+      }
+      .signup-error-popup-title {
+        display: block;
+        font-weight: 700;
+        margin-bottom: 0.15rem;
+        color: #b91c1c;
+      }
+      .signup-error-popup-close {
+        position: absolute;
+        top: 0.4rem;
+        right: 0.55rem;
+        background: none;
+        border: none;
+        font-size: 1.1rem;
+        line-height: 1;
+        color: #b91c1c;
+        cursor: pointer;
+      }
+      label.is-required-missing {
+        color: #b91c1c;
+      }
+      label.is-required-missing input,
+      label.is-required-missing select,
+      label.is-required-missing textarea {
+        border-color: #dc2626 !important;
+        background-color: #fef2f2;
+        box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.18);
+      }
+      .required-asterisk {
+        color: #dc2626;
+        margin-left: 0.15rem;
+        font-weight: 700;
+      }
     </style>
   </head>
   <body class="has-hero-bg">
+    <div id="signup-error-popup" class="signup-error-popup" role="alert" aria-live="assertive">
+      <button type="button" class="signup-error-popup-close" id="signup-error-popup-close" aria-label="Dismiss error">×</button>
+      <strong class="signup-error-popup-title">Could not create account</strong>
+      <span id="signup-error-popup-message"></span>
+    </div>
     <header class="topbar" id="topbar">
       <div class="topbar-inner">
         <a class="brand" href="/" aria-label="Go to GIMS home">
@@ -67,8 +130,28 @@
 
     <main class="container">
       <section class="card auth-card">
-        <h2>Step 1: Verify your XU email</h2>
-        <p class="muted small">
+        <div id="signup-google-banner" style="display:none; background:rgba(32,58,115,0.06); border:1px solid rgba(32,58,115,0.18); border-radius:0.6rem; padding:0.85rem 1rem; margin-bottom:1rem;">
+          <strong style="color: var(--xu-blue, #203a73);">Signed in with Google</strong>
+          <p class="muted small" style="margin:0.3rem 0 0;">
+            Your Xavier email is verified via Google. Just complete your profile below to finish creating your account — no PIN or password needed.
+          </p>
+        </div>
+
+        <div id="signup-google-card" style="margin-bottom:1.25rem;">
+          <h2 style="margin-top:0;">Quick sign-up with Google</h2>
+          <p class="muted small">
+            Use your <strong>@xu.edu.ph</strong> or <strong>@my.xu.edu.ph</strong> Google account to skip the email PIN step.
+          </p>
+          <div id="signup-google-container" style="display:flex; justify-content:flex-start; margin-top:0.5rem;"></div>
+          <div style="display:flex; align-items:center; gap:0.6rem; margin:1rem 0 0; color:var(--muted); font-size:0.82rem;">
+            <span style="flex:1; height:1px; background:var(--border);"></span>
+            <span>or use email + PIN</span>
+            <span style="flex:1; height:1px; background:var(--border);"></span>
+          </div>
+        </div>
+
+        <h2 id="signup-step1-heading">Step 1: Verify your XU email</h2>
+        <p class="muted small" id="signup-step1-help">
           Enter your Xavier Gmail address and request a 6‑digit verification PIN. This code will expire in 5 minutes.
         </p>
         <form id="signup-form">
@@ -113,50 +196,74 @@
               <span class="signup-step2-lock-badge" aria-live="polite">🔒 Verify your email first</span>
             </h2>
             <p class="muted small">
-              After your email is verified, fill in your employee details. All fields marked * are required.
+              After your email is verified, fill in your employee details. All fields marked <span class="required-asterisk">*</span> are required.
             </p>
 
             <div class="row">
               <label>
-                First Name *
+                First Name <span class="required-asterisk">*</span>
                 <input type="text" id="signup-first-name" name="firstName" required />
               </label>
               <label>
-                Last Name *
+                Last Name <span class="required-asterisk">*</span>
                 <input type="text" id="signup-last-name" name="lastName" required />
               </label>
             </div>
             <label>
-              Department *
+              Department <span class="required-asterisk">*</span>
               <input type="text" id="signup-department" name="department" list="signup-department-list" autocomplete="off" placeholder="Type to search departments…" required />
               <datalist id="signup-department-list"></datalist>
             </label>
             <label>
-              Position / Workforce Role *
+              Position / Workforce Role <span class="required-asterisk">*</span>
               <input type="text" id="signup-position" name="position" list="signup-position-list" autocomplete="off" placeholder="Type to search roles…" required />
               <datalist id="signup-position-list"></datalist>
             </label>
             <label>
-              Password *
-              <input
-                type="password"
-                id="signup-password"
-                name="password"
-                autocomplete="new-password"
-                required
-              />
-              <small class="muted" style="display:block; margin-top:0.3rem; font-size:0.8rem; font-weight:400;">
+              Password <span class="required-asterisk">*</span>
+              <div class="password-field">
+                <input
+                  type="password"
+                  id="signup-password"
+                  name="password"
+                  autocomplete="new-password"
+                  required
+                />
+                <button type="button" class="password-toggle" aria-label="Show password"></button>
+              </div>
+              <small id="signup-password-hint" class="muted" style="display:none; margin-top:0.3rem; font-size:0.8rem; font-weight:400; color:#b91c1c;">
                 Must be at least 8 characters and include an uppercase letter, a number, and a special character.
               </small>
             </label>
             <div class="row">
               <label>
-                Assigned Birth Sex *
-                <input type="text" id="signup-birth-sex" name="birthSex" required placeholder="Male or Female" />
+                Sex Assigned at Birth <span class="required-asterisk">*</span>
+                <select id="signup-birth-sex" name="birthSex" required>
+                  <option value="">Select...</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Intersex">Intersex</option>
+                  <option value="Prefer not to say">Prefer not to say</option>
+                </select>
               </label>
               <label>
                 Gender Identity (optional)
-                <input type="text" id="signup-gender-identity" name="genderIdentity" />
+                <select id="signup-gender-identity" name="genderIdentity">
+                  <option value="">Select...</option>
+                  <option value="Man">Man</option>
+                  <option value="Woman">Woman</option>
+                  <option value="Non-binary">Non-binary</option>
+                  <option value="Transgender Man">Transgender Man</option>
+                  <option value="Transgender Woman">Transgender Woman</option>
+                  <option value="Prefer to self-describe">Prefer to self-describe</option>
+                  <option value="Prefer not to say">Prefer not to say</option>
+                </select>
+              </label>
+            </div>
+            <div class="row" id="signup-gender-self-describe-row" style="display:none;">
+              <label style="flex:1 1 100%;">
+                Please self-describe your gender identity
+                <input type="text" id="signup-gender-self-describe" name="genderSelfDescribe" placeholder="Self-describe" />
               </label>
             </div>
 

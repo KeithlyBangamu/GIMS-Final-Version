@@ -3,15 +3,47 @@ document.addEventListener('DOMContentLoaded', () => {
   let token = window.localStorage.getItem('gims_employee_token');
   const savedRole = window.localStorage.getItem('gims_role');
 
-  if (!token) {
-    window.location.href = '/';
+  const decodeJwtPayload = (jwtToken) => {
+    try {
+      const parts = String(jwtToken || '').split('.');
+      if (parts.length !== 3) return null;
+      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const pad = '='.repeat((4 - (base64.length % 4)) % 4);
+      return JSON.parse(atob(base64 + pad));
+    } catch {
+      return null;
+    }
+  };
+  const isTokenValid = (jwtToken) => {
+    const data = decodeJwtPayload(jwtToken);
+    if (!data) return false;
+    if (data.exp && Date.now() / 1000 > data.exp) return false;
+    return true;
+  };
+  const redirectToHome = () => {
+    window.localStorage.removeItem('gims_employee_token');
+    window.localStorage.removeItem('gims_role');
+    window.location.replace('/');
+  };
+
+  if (!token || !isTokenValid(token)) {
+    redirectToHome();
     return;
   }
 
   if (savedRole === 'admin') {
-    window.location.href = '/admin.html';
+    window.location.replace('/admin.html');
     return;
   }
+
+  // Re-validate after Back/Forward navigation (bfcache restore).
+  window.addEventListener('pageshow', (event) => {
+    const stored = window.localStorage.getItem('gims_employee_token');
+    if (event.persisted || stored !== token) {
+      token = stored;
+      if (!isTokenValid(token)) redirectToHome();
+    }
+  });
 
   const el = {
     topbarName: null,
@@ -1035,7 +1067,7 @@ document.addEventListener('DOMContentLoaded', () => {
   el.logoutBtn?.addEventListener('click', () => {
     window.localStorage.removeItem('gims_employee_token');
     window.localStorage.removeItem('gims_role');
-    window.location.href = '/';
+    window.location.replace('/');
   });
 
   const sidebarLinks = Array.from(
@@ -1267,7 +1299,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (String(err?.message || '').toLowerCase().includes('not authenticated')) {
       window.localStorage.removeItem('gims_employee_token');
       window.localStorage.removeItem('gims_role');
-      window.location.href = '/';
+      window.location.replace('/');
       return;
     }
     if (el.upcomingStatus) el.upcomingStatus.textContent = err.message || 'Failed to load dashboard.';

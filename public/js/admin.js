@@ -28,13 +28,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  const payload = decodeJwtPayload(adminToken);
-  if (!adminToken || payload?.role !== 'admin') {
+  const isAdminTokenValid = (jwtToken) => {
+    const data = decodeJwtPayload(jwtToken);
+    if (!data || data.role !== 'admin') return false;
+    if (data.exp && Date.now() / 1000 > data.exp) return false;
+    return true;
+  };
+
+  const redirectToHome = () => {
     window.localStorage.removeItem('gims_employee_token');
     window.localStorage.removeItem('gims_role');
-    window.location.href = '/';
+    window.location.replace('/');
+  };
+
+  if (!isAdminTokenValid(adminToken)) {
+    redirectToHome();
     return;
   }
+
+  // Re-validate when the page is shown from the bfcache (Back/Forward nav).
+  window.addEventListener('pageshow', (event) => {
+    const stored = window.localStorage.getItem('gims_employee_token');
+    if (event.persisted || stored !== adminToken) {
+      adminToken = stored;
+      if (!isAdminTokenValid(adminToken)) redirectToHome();
+    }
+  });
 
   const logoutBtn = document.getElementById('admin-logout-btn');
   const createAdminForm = document.getElementById('admin-create-admin-form');
@@ -88,6 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const profileEmailEl = document.getElementById('admin-employee-profile-email');
   const profileDepartmentEl = document.getElementById('admin-employee-profile-department');
   const profilePositionEl = document.getElementById('admin-employee-profile-position');
+  const profileRegisteredEl = document.getElementById('admin-employee-profile-registered');
   const profileStatusEl = document.getElementById('admin-employee-profile-status');
   const profileReservedCountEl = document.getElementById('admin-employee-profile-reserved-count');
   const profileTakenCountEl = document.getElementById('admin-employee-profile-taken-count');
@@ -524,6 +544,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const normalizeAccountStatus = (value) => {
     return String(value || '').toLowerCase() === 'deactivated' ? 'deactivated' : 'active';
+  };
+
+  const formatRegisteredDate = (value) => {
+    if (!value) return '—';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
   };
 
   const getAccountStatusBadge = (value) => {
@@ -1165,6 +1192,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Reload the modal
       const seminar = currentSeminars.find((s) => String(s._id) === String(attendanceModalState.seminarId));
       if (seminar) await openParticipantsModal(seminar);
+      updateSeminarsNotificationDot();
     } catch (err) {
       if (preRegStatusEl) preRegStatusEl.textContent = err.message || 'Failed to approve participants.';
     }
@@ -1277,6 +1305,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderEmailLink(profileEmailEl, row.email);
     if (profileDepartmentEl) profileDepartmentEl.textContent = row.department || '—';
     if (profilePositionEl) profilePositionEl.textContent = row.position || '—';
+    if (profileRegisteredEl) profileRegisteredEl.textContent = formatRegisteredDate(row.registeredAt);
     if (profileStatusEl) {
       const baseStatus = row.seminarStatus || '—';
       const accountText = normalizeAccountStatus(row.accountStatus) === 'deactivated' ? ' • Account: Deactivated' : '';
@@ -1312,6 +1341,7 @@ document.addEventListener('DOMContentLoaded', () => {
       renderEmailLink(profileEmailEl, profile.email || row.email);
       if (profileDepartmentEl) profileDepartmentEl.textContent = profile.department || row.department || '—';
       if (profilePositionEl) profilePositionEl.textContent = profile.position || row.position || '—';
+      if (profileRegisteredEl) profileRegisteredEl.textContent = formatRegisteredDate(profile.registeredAt || row.registeredAt);
       if (profileStatusEl) {
         const statusLabel = profile.seminarStatus || row.seminarStatus || '—';
         const completionText = profile.completionText ? ` (${profile.completionText})` : '';
@@ -1404,6 +1434,7 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   const setTopbarFromToken = () => {
+    const payload = decodeJwtPayload(adminToken) || {};
     const email = String(payload.email || '');
     const first = email.split('@')[0] || '';
     const prettyName = first
@@ -1881,6 +1912,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (isDeletedSeminarsModalOpen) {
         await loadDeletedSeminars();
       }
+      if (typeof updateSeminarsNotificationDot === 'function') {
+        updateSeminarsNotificationDot();
+      }
     } catch (err) {
       if (seminarsStatusEl) seminarsStatusEl.textContent = err.message || 'Failed to load seminars.';
       if (isDeletedSeminarsModalOpen && deletedSeminarsStatusEl) {
@@ -1909,6 +1943,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <td><input type="checkbox" class="admin-row-check" value="${row.id}" style="${checkboxStyle}" /></td>
             <td>${escapeHtml(row.employeeId)}</td>
             <td>${escapeHtml(row.department)}</td>
+            <td>${escapeHtml(formatRegisteredDate(row.registeredAt))}</td>
             <td>${statusBadge}</td>
             <td><button class="table-link-btn" type="button" data-employee-account-menu="${row.id}">${accountBadge}</button></td>
           </tr>
@@ -1924,6 +1959,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <th><input type="checkbox" id="admin-select-all" ${checkboxesEnabled ? '' : 'disabled'} /></th>
             <th>Employee ID</th>
             <th>Department</th>
+            <th>Registered</th>
             <th>Seminar Status</th>
             <th>Account</th>
           </tr>
@@ -2004,7 +2040,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (String(err.message || '').toLowerCase().includes('invalid token')) {
         window.localStorage.removeItem('gims_employee_token');
         window.localStorage.removeItem('gims_role');
-        window.location.href = '/';
+        window.location.replace('/');
       }
     }
   };
@@ -2018,12 +2054,116 @@ document.addEventListener('DOMContentLoaded', () => {
     compliantEmployeesEl.textContent = String(data.compliant ?? 0);
   };
 
+  const notifBellBtn = document.getElementById('admin-notif-bell-btn');
+  const notifBellWrapper = document.getElementById('admin-notif-bell-wrapper');
+  const notifBadgeEl = document.getElementById('admin-notif-badge');
+  const notifDropdownEl = document.getElementById('admin-notif-dropdown');
+  const notifListEl = document.getElementById('admin-notif-list');
+  const notifRefreshBtn = document.getElementById('admin-notif-refresh-btn');
+
+  const formatNotifTime = (date) => {
+    if (!date) return '';
+    const then = new Date(date).getTime();
+    if (Number.isNaN(then)) return '';
+    const diffMs = Date.now() - then;
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'Just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 7) return `${diffDay}d ago`;
+    return new Date(date).toLocaleDateString();
+  };
+
+  const renderAdminNotifications = (items) => {
+    if (!notifListEl) return;
+    if (!Array.isArray(items) || items.length === 0) {
+      notifListEl.innerHTML = '<div class="notif-empty">No notifications yet.</div>';
+      return;
+    }
+    const iconFor = (type) => {
+      if (type === 'pre-registration') return '<i class="fa-solid fa-user-plus" style="color:#b45309;"></i>';
+      if (type === 'evaluation') return '<i class="fa-solid fa-clipboard-check" style="color:#059669;"></i>';
+      return '<i class="fa-solid fa-bell" style="color:var(--xu-blue);"></i>';
+    };
+    notifListEl.innerHTML = items
+      .map((n) => `
+        <div class="notif-item unread" data-seminar-id="${escapeHtml(String(n.seminarId || ''))}" data-notif-type="${escapeHtml(String(n.type || ''))}">
+          <span class="notif-icon">${iconFor(n.type)}</span>
+          <div class="notif-item-body">
+            <div class="notif-item-msg">${escapeHtml(n.message)}</div>
+            <div class="notif-item-time">${escapeHtml(formatNotifTime(n.timestamp))}</div>
+          </div>
+        </div>
+      `)
+      .join('');
+
+    notifListEl.querySelectorAll('.notif-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        notifDropdownEl?.classList.remove('is-open');
+        showNavModule('seminars');
+      });
+    });
+  };
+
+  const updateAdminNotificationBell = async () => {
+    if (!notifBadgeEl) return;
+    try {
+      const res = await authedFetch('/api/admin/notifications/bell');
+      if (!res.ok) return;
+      const data = await res.json();
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const unread = Number(data?.unreadCount || items.length || 0);
+
+      renderAdminNotifications(items);
+
+      if (unread > 0) {
+        notifBadgeEl.textContent = unread > 99 ? '99+' : String(unread);
+        notifBadgeEl.style.display = 'flex';
+      } else {
+        notifBadgeEl.style.display = 'none';
+      }
+    } catch {
+      // Silent — the bell is non-critical UI.
+    }
+  };
+
+  // Backwards-compatible alias used elsewhere in this file. The prior sidebar
+  // dot was removed, but other callsites still invoke this name to refresh
+  // notification state after seminar mutations.
+  const updateSeminarsNotificationDot = updateAdminNotificationBell;
+
+  notifBellBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!notifDropdownEl) return;
+    const isOpen = notifDropdownEl.classList.contains('is-open');
+    notifDropdownEl.classList.toggle('is-open', !isOpen);
+    if (!isOpen) updateAdminNotificationBell();
+  });
+
+  notifRefreshBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    updateAdminNotificationBell();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (notifBellWrapper && !notifBellWrapper.contains(e.target)) {
+      notifDropdownEl?.classList.remove('is-open');
+    }
+  });
+
   const loadAll = async () => {
     await loadSummary();
     await loadDepartmentsAndEmployees();
     await loadSeminars();
+    await updateSeminarsNotificationDot();
     window.localStorage.setItem('gims_role', 'admin');
   };
+
+  // Refresh the badge on a light interval so admins see new pre-registrations
+  // without a full page reload.
+  setInterval(() => { updateSeminarsNotificationDot(); }, 60_000);
 
   // ========================
   // EVENT LISTENERS
@@ -2541,7 +2681,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.localStorage.removeItem('gims_employee_token');
     window.localStorage.removeItem('gims_role');
     adminToken = null;
-    window.location.href = '/';
+    window.location.replace('/');
   });
 
   initCalendarToggle('create');
@@ -2554,7 +2694,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.localStorage.removeItem('gims_employee_token');
     window.localStorage.removeItem('gims_role');
     setTimeout(() => {
-      window.location.href = '/';
+      window.location.replace('/');
     }, 600);
   });
 });

@@ -1,5 +1,6 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import { OAuth2Client } from 'google-auth-library';
 
 import PinVerification from '../models/PinVerification.js';
 import PasswordReset from '../models/PasswordReset.js';
@@ -8,6 +9,8 @@ import User from '../models/User.js';
 import { sendPasswordResetPinEmail, sendVerificationPinEmail } from '../services/emailService.js';
 
 const router = express.Router();
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const EMAIL_DOMAINS = ['@xu.edu.ph', '@my.xu.edu.ph'];
 
@@ -329,6 +332,161 @@ router.post('/login', async (req, res, next) => {
     );
 
     return res.json({ token, role });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/google-config', (req, res) => {
+  res.json({ clientId: process.env.GOOGLE_CLIENT_ID || '' });
+});
+
+router.post('/google', async (req, res, next) => {
+  try {
+    const { credential } = req.body;
+    if (!credential) {
+      return res.status(400).json({ message: 'Missing Google credential.' });
+    }
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      return res.status(500).json({ message: 'Google sign-in is not configured on the server.' });
+    }
+
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    } catch {
+      return res.status(401).json({ message: 'Invalid Google credential.' });
+    }
+
+    const email = String(payload?.email || '').toLowerCase().trim();
+    if (!payload?.email_verified) {
+      return res.status(401).json({ message: 'Google email is not verified.' });
+    }
+    if (!isValidXUEmail(email)) {
+      return res.status(403).json({ message: 'Only @xu.edu.ph or @my.xu.edu.ph accounts can sign in.' });
+    }
+
+    const user = await User.findOne({ username: email }).populate('employee');
+    if (!user) {
+      const profileToken = jwt.sign(
+        {
+          email,
+          scope: 'google-profile-completion',
+          firstName: payload?.given_name || '',
+          lastName: payload?.family_name || '',
+        },
+        process.env.JWT_SECRET || 'gims-secret',
+        { expiresIn: '15m' }
+      );
+      return res.status(200).json({
+        needsProfile: true,
+        profileToken,
+        email,
+        firstName: payload?.given_name || '',
+        lastName: payload?.family_name || '',
+      });
+    }
+    if (user.role === 'employee' && !user.employee) {
+      return res.status(401).json({ message: 'Employee profile not found.' });
+    }
+    if (user.role === 'employee' && user.employee?.accountStatus === 'deactivated') {
+      return res.status(403).json({ message: 'Your account is deactivated. Please contact the GAD office.' });
+    }
+
+    const id = user.employee?._id || user._id;
+    const token = jwt.sign(
+      { id, role: user.role, email },
+      process.env.JWT_SECRET || 'gims-secret',
+      { expiresIn: '8h' }
+    );
+
+    return res.json({ token, role: user.role });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/google/complete-account', async (req, res, next) => {
+  try {
+    const header = req.headers.authorization;
+    if (!header) return res.status(401).json({ message: 'Missing Authorization header' });
+    const token = header.replace('Bearer ', '');
+
+    let payload;
+    try {
+      payload = jwt.verify(token, process.env.JWT_SECRET || 'gims-secret');
+    } catch {
+      return res.status(401).json({ message: 'Invalid or expired profile token.' });
+    }
+    if (payload.scope !== 'google-profile-completion' || !payload.email) {
+      return res.status(403).json({ message: 'Invalid profile scope.' });
+    }
+    if (!isValidXUEmail(payload.email)) {
+      return res.status(403).json({ message: 'Only @xu.edu.ph or @my.xu.edu.ph accounts can sign in.' });
+    }
+
+    const { firstName, lastName, department, position, birthSex, genderIdentity } = req.body;
+    const fName = String(firstName || payload.firstName || '').trim();
+    const lName = String(lastName || payload.lastName || '').trim();
+
+    if (!fName || !lName || !department || !position || !birthSex) {
+      return res.status(400).json({
+        message: 'First Name, Last Name, Department, Position, and Birth Sex are required.',
+      });
+    }
+
+    const existingUser = await User.findOne({ username: payload.email });
+    if (existingUser) {
+      return res.status(400).json({ message: 'An account with this email already exists.' });
+    }
+    const existingEmployee = await Employee.findOne({ email: payload.email });
+    if (existingEmployee) {
+      return res.status(400).json({ message: 'An account with this email already exists.' });
+    }
+
+    const fullName = `${fName} ${lName}`;
+    const employee = await Employee.create({
+      firstName: fName,
+      lastName: lName,
+      name: fullName,
+      email: payload.email,
+      department,
+      position,
+      birthSex: String(birthSex || '').trim(),
+      genderIdentity: genderIdentity || undefined,
+      role: 'employee',
+    });
+
+    // Random password that satisfies the password policy. Google sign-in is the auth path,
+    // but the User schema requires a passwordHash. The user can later set a real password
+    // via the existing forgot-password flow if they want password login too.
+    const randomPassword = `Goog!e-${Math.random().toString(36).slice(2, 10)}-${Date.now()}`;
+
+    const user = new User({
+      username: payload.email,
+      role: 'employee',
+      passwordHash: '',
+      employee: employee._id,
+    });
+    await user.setPassword(randomPassword);
+    await user.save();
+
+    const sessionToken = jwt.sign(
+      { id: employee._id, role: employee.role, email: employee.email },
+      process.env.JWT_SECRET || 'gims-secret',
+      { expiresIn: '8h' }
+    );
+
+    return res.status(201).json({
+      message: 'Account created successfully.',
+      employee,
+      token: sessionToken,
+      role: 'employee',
+    });
   } catch (err) {
     next(err);
   }

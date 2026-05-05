@@ -1,7 +1,107 @@
 const _EYE = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
 const _EYE_OFF = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
 
+window.handleGoogleCredential = async (response) => {
+  const statusEl = document.getElementById('login-status');
+  if (statusEl) statusEl.textContent = 'Signing in with Google…';
+  try {
+    const res = await fetch('/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: response.credential }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body?.message || 'Google sign-in failed.');
+
+    if (body.needsProfile) {
+      const params = new URLSearchParams({
+        token: body.profileToken,
+        email: body.email || '',
+        firstName: body.firstName || '',
+        lastName: body.lastName || '',
+      });
+      if (statusEl) statusEl.textContent = 'New account — finish your profile to continue…';
+      window.location.href = `/signup.html#google=${encodeURIComponent(params.toString())}`;
+      return;
+    }
+
+    if (body.token) window.localStorage.setItem('gims_employee_token', body.token);
+    if (body.role) window.localStorage.setItem('gims_role', String(body.role));
+    if (statusEl) statusEl.textContent = 'Logged in. Redirecting to your dashboard…';
+    setTimeout(() => {
+      window.location.href = body.role === 'admin' ? '/admin.html' : '/employee.html';
+    }, 700);
+  } catch (err) {
+    if (statusEl) statusEl.textContent = err.message || 'Google sign-in failed.';
+  }
+};
+
+const initGoogleSignIn = async () => {
+  const container = document.getElementById('google-signin-container');
+  if (!container) return;
+  try {
+    const res = await fetch('/api/auth/google-config');
+    const { clientId } = await res.json();
+    if (!clientId) {
+      container.innerHTML = '<span class="muted small">Google sign-in is not configured.</span>';
+      return;
+    }
+    const tryRender = () => {
+      if (!window.google?.accounts?.id) {
+        setTimeout(tryRender, 150);
+        return;
+      }
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: window.handleGoogleCredential,
+        auto_select: false,
+        ux_mode: 'popup',
+      });
+      window.google.accounts.id.renderButton(container, {
+        type: 'standard',
+        theme: 'outline',
+        size: 'large',
+        text: 'signin_with',
+        shape: 'rectangular',
+        logo_alignment: 'left',
+        width: 320,
+      });
+    };
+    tryRender();
+  } catch {
+    container.innerHTML = '<span class="muted small">Google sign-in unavailable.</span>';
+  }
+};
+
+const _decodeJwt = (jwtToken) => {
+  try {
+    const parts = String(jwtToken || '').split('.');
+    if (parts.length !== 3) return null;
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+    return JSON.parse(atob(b64 + pad));
+  } catch { return null; }
+};
+const _redirectIfLoggedIn = () => {
+  const stored = window.localStorage.getItem('gims_employee_token');
+  if (!stored) return false;
+  const payload = _decodeJwt(stored);
+  if (!payload || (payload.exp && Date.now() / 1000 > payload.exp)) {
+    window.localStorage.removeItem('gims_employee_token');
+    window.localStorage.removeItem('gims_role');
+    return false;
+  }
+  const role = window.localStorage.getItem('gims_role') || payload.role;
+  window.location.replace(role === 'admin' ? '/admin.html' : '/employee.html');
+  return true;
+};
+
 document.addEventListener('DOMContentLoaded', () => {
+  if (_redirectIfLoggedIn()) return;
+  // Re-check on Back/Forward (bfcache) so a fresh login doesn't re-render here.
+  window.addEventListener('pageshow', () => { _redirectIfLoggedIn(); });
+  initGoogleSignIn();
+
   document.querySelectorAll('.password-toggle').forEach(btn => {
     btn.innerHTML = _EYE;
     btn.addEventListener('click', () => {
@@ -341,21 +441,47 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  const emailField = form?.querySelector('input[name="email"]');
+  const passwordField = form?.querySelector('input[name="password"]');
+  const submitBtnLabel = submitBtn?.textContent || 'Login';
+
+  const clearFieldError = (input) => {
+    if (!input) return;
+    input.classList.remove('is-invalid');
+    input.removeAttribute('aria-invalid');
+  };
+  const markFieldError = (input) => {
+    if (!input) return;
+    input.classList.add('is-invalid');
+    input.setAttribute('aria-invalid', 'true');
+  };
+  emailField?.addEventListener('input', () => clearFieldError(emailField));
+  passwordField?.addEventListener('input', () => clearFieldError(passwordField));
+
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!form || !statusEl) return;
     statusEl.textContent = '';
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Signing in...';
-    }
+    statusEl.classList.remove('is-error');
+    clearFieldError(emailField);
+    clearFieldError(passwordField);
+
     const data = new FormData(form);
     const email = String(data.get('email') || '').trim();
     const password = String(data.get('password') || '').trim();
 
     if (!email || !password) {
-      statusEl.textContent = 'Please enter both email and password.';
+      if (!email) markFieldError(emailField);
+      if (!password) markFieldError(passwordField);
+      statusEl.textContent = 'Please fill in the highlighted field(s).';
+      statusEl.classList.add('is-error');
+      (!email ? emailField : passwordField)?.focus();
       return;
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Signing in...';
     }
 
     try {
@@ -385,10 +511,16 @@ document.addEventListener('DOMContentLoaded', () => {
       }, 900);
     } catch (err) {
       statusEl.textContent = err.message || 'Login failed.';
+      statusEl.classList.add('is-error');
+      const msg = String(err.message || '').toLowerCase();
+      if (msg.includes('credential') || msg.includes('password') || msg.includes('invalid')) {
+        markFieldError(emailField);
+        markFieldError(passwordField);
+      }
     } finally {
       if (submitBtn) {
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Login';
+        submitBtn.textContent = submitBtnLabel;
       }
     }
   });

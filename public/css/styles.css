@@ -764,6 +764,22 @@ textarea {
   color: var(--muted);
 }
 
+.status.is-error {
+  color: #b91c1c;
+}
+
+.is-invalid,
+input.is-invalid,
+select.is-invalid,
+textarea.is-invalid {
+  border-color: #dc2626 !important;
+  background-color: #fef2f2;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.18);
+  color: #991b1b;
+}
+
+.is-invalid::placeholder { color: #ef4444; opacity: 0.85; }
+
 .output {
   background: #0b1220;
   color: #e5e7eb;

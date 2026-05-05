@@ -228,6 +228,107 @@ router.post('/login', async (req, res, next) => {
   }
 });
 
+// Lightweight badge counts shown on the admin sidebar (pending actions for
+// seminars). The frontend polls this to render the unread-style dot.
+router.get('/notifications/summary', authMiddleware, async (req, res, next) => {
+  try {
+    const pendingApprovals = await Registration.countDocuments({ status: 'pre-registered' });
+
+    const seminars = await Seminar.find({ isDeleted: { $ne: true } })
+      .select('isHeld sessions')
+      .lean();
+    const pendingFinalization = seminars.reduce((acc, s) => {
+      const sessions = Array.isArray(s.sessions) ? s.sessions : [];
+      const allHeld = sessions.length > 0 && sessions.every((sess) => sess.isHeld);
+      return acc + (allHeld && !s.isHeld ? 1 : 0);
+    }, 0);
+
+    res.json({
+      seminars: {
+        pendingApprovals,
+        pendingFinalization,
+        total: pendingApprovals + pendingFinalization,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Aggregated notification bell feed for admins. Returns a small list of
+// general-purpose items grouped by seminar (pre-registrations awaiting
+// approval, evaluations submitted) so a single bell scales across many
+// employees without one row per person.
+router.get('/notifications/bell', authMiddleware, async (req, res, next) => {
+  try {
+    const seminars = await Seminar.find({ isDeleted: { $ne: true } })
+      .select('title date')
+      .lean();
+    const seminarMap = new Map(seminars.map((s) => [String(s._id), s]));
+
+    const pendingBySeminar = await Registration.aggregate([
+      { $match: { status: 'pre-registered' } },
+      { $group: { _id: '$seminarID', count: { $sum: 1 }, latest: { $max: '$registeredAt' } } },
+    ]);
+
+    const evalsBySeminar = await Evaluation.aggregate([
+      { $group: { _id: '$seminarID', count: { $sum: 1 }, latest: { $max: '$submittedAt' } } },
+    ]);
+
+    const items = [];
+
+    for (const row of pendingBySeminar) {
+      const seminar = seminarMap.get(String(row._id));
+      if (!seminar) continue;
+      const count = Number(row.count || 0);
+      if (count <= 0) continue;
+      items.push({
+        type: 'pre-registration',
+        seminarId: String(row._id),
+        seminarTitle: seminar.title || 'Untitled Seminar',
+        count,
+        message:
+          count === 1
+            ? `1 employee pre-registered for "${seminar.title}" — review and approve.`
+            : `${count} employees pre-registered for "${seminar.title}" — review and approve.`,
+        timestamp: row.latest || new Date(),
+      });
+    }
+
+    for (const row of evalsBySeminar) {
+      const seminar = seminarMap.get(String(row._id));
+      if (!seminar) continue;
+      const count = Number(row.count || 0);
+      if (count <= 0) continue;
+      items.push({
+        type: 'evaluation',
+        seminarId: String(row._id),
+        seminarTitle: seminar.title || 'Untitled Seminar',
+        count,
+        message:
+          count === 1
+            ? `1 evaluation submitted for "${seminar.title}".`
+            : `${count} evaluations submitted for "${seminar.title}".`,
+        timestamp: row.latest || new Date(),
+      });
+    }
+
+    items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    const totalPendingApprovals = items
+      .filter((i) => i.type === 'pre-registration')
+      .reduce((acc, i) => acc + i.count, 0);
+
+    res.json({
+      items,
+      unreadCount: items.length,
+      totalPendingApprovals,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Dashboard summary
 router.get('/reports/summary', authMiddleware, async (req, res, next) => {
   try {
@@ -305,6 +406,7 @@ router.get('/employees', authMiddleware, async (req, res, next) => {
         accountStatus: e.accountStatus === 'deactivated' ? 'deactivated' : 'active',
         isActive: e.accountStatus !== 'deactivated',
         deactivatedAt: e.deactivatedAt || null,
+        registeredAt: e.createdAt || null,
         updatedAt: e.updatedAt,
       };
     });
@@ -437,6 +539,7 @@ router.get('/employees/:id/profile', authMiddleware, async (req, res, next) => {
         position: employee.position || '',
         accountStatus: employee.accountStatus === 'deactivated' ? 'deactivated' : 'active',
         deactivatedAt: employee.deactivatedAt || null,
+        registeredAt: employee.createdAt || null,
         seminarStatus: attended >= required ? 'Complete' : 'Incomplete',
         completionText: `${attended}/${required}`,
       },

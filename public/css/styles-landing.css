@@ -328,6 +328,18 @@ input {
 }
 
 .status { font-size: 0.85rem; margin-top: 0.65rem; color: rgba(226, 232, 240, 0.75); }
+.status.is-error { color: #fecaca; }
+
+.is-invalid,
+input.is-invalid,
+select.is-invalid,
+textarea.is-invalid {
+  border-color: #ef4444 !important;
+  background-color: rgba(254, 226, 226, 0.92);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.35);
+  color: #7f1d1d;
+}
+.is-invalid::placeholder { color: #ef4444; opacity: 0.85; }
 
 /* ---------- Buttons ---------- */
 .btn {
