@@ -564,95 +564,6 @@ document.addEventListener('DOMContentLoaded', () => {
       .replaceAll("'", '&#039;');
   };
 
-  const buildAdminManageSeminarDescriptionHtml = (rawDesc) => {
-    const desc = String(rawDesc || '').trim();
-    if (!desc) {
-      return '<p class="muted small joined-seminar-description" style="margin:0; font-size:0.92rem;">—</p>';
-    }
-    const descHtml = escapeHtml(desc);
-    return `
-      <div class="joined-seminar-desc-autowrap" data-desc-autowrap>
-        <div class="joined-seminar-desc-measure-clip">
-          <p class="muted small joined-seminar-description joined-seminar-desc-measure-txt" style="margin:0; font-size:0.92rem;">${descHtml}</p>
-        </div>
-      </div>
-    `;
-  };
-
-  const resolveAdminDescMeasureBudgetPx = (wrap) => {
-    const host = wrap.closest('.admin-seminar-card-desc');
-    if (host && host.clientHeight > 48) return Math.floor(host.clientHeight);
-    return 0;
-  };
-
-  const DESC_ADMIN_COLLAPSED_PREVIEW_CAP_PX = 84;
-
-  const buildAdminExpandableDescriptionMarkup = (descHtml, collapsedPreviewMaxPx = 0) => {
-    const maskClamp = collapsedPreviewMaxPx > 0 ? `max-height:${collapsedPreviewMaxPx}px;` : '';
-    return `
-      <div class="joined-seminar-desc-block">
-        <div class="joined-seminar-desc-view joined-seminar-description--collapsed">
-          <div class="joined-seminar-description-mask" style="${maskClamp}">
-            <p class="muted small joined-seminar-description" style="margin:0; font-size:0.92rem;">${descHtml}</p>
-          </div>
-          <button type="button" class="joined-seminar-desc-chevron-btn" aria-expanded="false" aria-label="Expand description">
-            <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
-          </button>
-        </div>
-      </div>
-    `;
-  };
-
-  const finalizeAdminSeminarDescriptionAutowrap = (root) => {
-    if (!root) return;
-    Array.from(root.querySelectorAll('[data-desc-autowrap]')).forEach((wrap) => {
-      const clip = wrap.querySelector('.joined-seminar-desc-measure-clip');
-      const p = clip?.querySelector('.joined-seminar-desc-measure-txt');
-      if (!clip || !p) return;
-      const budgetPx = resolveAdminDescMeasureBudgetPx(wrap);
-      const previewPx =
-        budgetPx > 0 ? Math.min(budgetPx, DESC_ADMIN_COLLAPSED_PREVIEW_CAP_PX) : DESC_ADMIN_COLLAPSED_PREVIEW_CAP_PX;
-      clip.style.maxHeight = `${previewPx}px`;
-      void clip.offsetHeight;
-      const fullText = p.textContent ?? '';
-      const needsExpand = clip.scrollHeight > clip.clientHeight + 1;
-      const descHtml = escapeHtml(fullText);
-      if (needsExpand) {
-        wrap.outerHTML = buildAdminExpandableDescriptionMarkup(descHtml, previewPx);
-      } else {
-        wrap.outerHTML = `<p class="muted small joined-seminar-description" style="margin:0; font-size:0.92rem;">${descHtml}</p>`;
-      }
-    });
-  };
-
-  const wireAdminManageSeminarDescriptionToggles = (root) => {
-    if (!root) return;
-    root.querySelectorAll('.joined-seminar-desc-block').forEach((block) => {
-      const view = block.querySelector('.joined-seminar-desc-view');
-      const mask = block.querySelector('.joined-seminar-description-mask');
-      const btn = block.querySelector('.joined-seminar-desc-chevron-btn');
-      if (!view || !mask || !btn) return;
-
-      const setExpanded = (open) => {
-        view.classList.toggle('joined-seminar-description--expanded', open);
-        view.classList.toggle('joined-seminar-description--collapsed', !open);
-        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-        btn.setAttribute('aria-label', open ? 'Collapse description' : 'Expand description');
-        if (open) mask.scrollTop = 0;
-      };
-
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const open = !view.classList.contains('joined-seminar-description--expanded');
-        setExpanded(open);
-      });
-
-      mask.addEventListener('click', () => {
-        if (view.classList.contains('joined-seminar-description--collapsed')) setExpanded(true);
-      });
-    });
-  };
-
   const normalizeAccountStatus = (value) => {
     return String(value || '').toLowerCase() === 'deactivated' ? 'deactivated' : 'active';
   };
@@ -1846,8 +1757,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const heldLabel = seminar.isHeld ? 'Held' : 'Upcoming';
         const autoSendLabel = seminar.autoSendCertificates ? 'Auto-cert' : '';
         return `
-          <article class="card admin-seminar-carousel-card" style="box-shadow:none; padding: 1rem; min-width: 320px; flex: 0 0 320px; display:flex; flex-direction:column;">
-            <div class="admin-seminar-card-top" style="display:flex; flex-direction:column; gap:0.35rem;">
+          <article class="card" style="box-shadow:none; padding: 1rem; min-width: 320px; flex: 0 0 320px; display:flex; flex-direction:column; gap: 0.75rem;">
             <div style="display:flex; justify-content: space-between; gap: 0.5rem; align-items:flex-start;">
               <h3 style="margin:0; color: var(--xu-blue);">${escapeHtml(seminar.title || 'Untitled Seminar')}</h3>
               <span class="badge badge-soft" style="display:inline-flex; align-items:center; justify-content:center; min-width:6.9rem; padding:0.32rem 0.9rem; text-align:center; white-space:nowrap; align-self:flex-start;">${escapeHtml(mandatoryLabel)}</span>
@@ -1864,13 +1774,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             <div class="muted small">Reserved: ${escapeHtml(registeredCount)}/${escapeHtml(capacity)}</div>
             <div class="muted small">Status: ${escapeHtml(heldLabel)} ${autoSendLabel ? `• <span style="color:#059669;">${escapeHtml(autoSendLabel)}</span>` : ''}</div>
-            </div>
             <div style="height:1px; background:var(--border); margin:0.1rem 0 0.2rem;"></div>
-            <div class="admin-seminar-card-desc">
-            ${buildAdminManageSeminarDescriptionHtml(seminar.description || '')}
+            <div class="seminar-desc-wrap" data-desc-wrap>
+              <div class="muted seminar-desc-clamp" data-desc-text style="font-size: 0.92rem; line-height:1.4; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;">${escapeHtml(seminar.description || '')}</div>
+              ${(seminar.description || '').length > 140 ? `<button type="button" class="link-btn" data-desc-toggle style="background:none; border:none; color:var(--xu-blue); padding:0; margin-top:0.2rem; cursor:pointer; font-size:0.82rem; font-weight:600;">View more</button>` : ''}
             </div>
 
-            <div class="admin-seminar-card-actions" style="${actionGroupStyle}">
+            <div style="${actionGroupStyle}">
               <button class="btn secondary" type="button" data-seminar-view="${seminar._id}" style="${wideButtonStyle}">View Participants</button>
               <button class="btn secondary" type="button" data-seminar-held="${seminar._id}" style="${wideButtonStyle}">${seminar.isHeld ? 'Unmark Held' : 'Mark as Held'}</button>
               <button class="btn" type="button" data-seminar-edit="${seminar._id}" style="${shortButtonStyle}">Edit</button>
@@ -1919,6 +1829,24 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
+    seminarsCarouselEl.querySelectorAll('[data-desc-toggle]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const wrap = button.closest('[data-desc-wrap]');
+        const text = wrap?.querySelector('[data-desc-text]');
+        if (!text) return;
+        const expanded = text.classList.toggle('seminar-desc-expanded');
+        if (expanded) {
+          text.style.webkitLineClamp = 'unset';
+          text.style.display = 'block';
+          button.textContent = 'View less';
+        } else {
+          text.style.display = '-webkit-box';
+          text.style.webkitLineClamp = '3';
+          button.textContent = 'View more';
+        }
+      });
+    });
+
     seminarsCarouselEl.querySelectorAll('[data-seminar-delete]').forEach((button) => {
       button.addEventListener('click', async () => {
         const seminar = currentSeminars.find((item) => String(item._id) === String(button.getAttribute('data-seminar-delete')));
@@ -1938,12 +1866,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
     });
-
-    const runManageSeminarDescLayout = () => {
-      finalizeAdminSeminarDescriptionAutowrap(seminarsCarouselEl);
-      wireAdminManageSeminarDescriptionToggles(seminarsCarouselEl);
-    };
-    requestAnimationFrame(() => requestAnimationFrame(runManageSeminarDescLayout));
   };
 
   const renderDeletedSeminars = (seminars) => {
