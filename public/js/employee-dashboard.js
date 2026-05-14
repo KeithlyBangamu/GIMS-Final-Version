@@ -1145,8 +1145,8 @@ document.addEventListener('DOMContentLoaded', () => {
     return opts
       .map(
         (label, i) => `
-        <label style="display:flex; align-items:center; gap:0.4rem; font-weight:400;">
-          <input type="radio" name="${name}" value="${i + 1}" required />
+        <label style="display:grid; grid-template-columns: 1.1rem 1fr; align-items:start; column-gap:0.55rem; font-weight:400; line-height:1.35;">
+          <input type="radio" name="${name}" value="${i + 1}" required style="margin:0.2rem 0 0; justify-self:center;" />
           <span>${escapeHtml(label)}</span>
         </label>`
       )
@@ -1191,11 +1191,13 @@ document.addEventListener('DOMContentLoaded', () => {
       <fieldset style="border:1px solid var(--border); border-radius:0.5rem; padding:0.75rem 0.9rem; margin:0;">
         <legend style="font-weight:600; padding:0 0.4rem;">Data Privacy & Informed Consent <span style="color:#ef4444;">*</span></legend>
         <p class="muted small" style="margin:0.25rem 0 0.5rem;">All personal/sensitive information will be kept confidential. By selecting "Yes" you give consent to the organizers to store and use necessary information in accordance with R.A. 10173 (Data Privacy Act of 2012).</p>
-        <label style="display:flex; align-items:center; gap:0.5rem; font-weight:400;">
-          <input type="radio" name="consent" value="yes" required /> Yes, I give my consent.
+        <label style="display:grid; grid-template-columns: 1.1rem 1fr; align-items:start; column-gap:0.55rem; font-weight:400; line-height:1.35;">
+          <input type="radio" name="consent" value="yes" required style="margin:0.2rem 0 0; justify-self:center;" />
+          <span>Yes, I give my consent.</span>
         </label>
-        <label style="display:flex; align-items:center; gap:0.5rem; font-weight:400;">
-          <input type="radio" name="consent" value="no" /> No, I do not give consent.
+        <label style="display:grid; grid-template-columns: 1.1rem 1fr; align-items:start; column-gap:0.55rem; font-weight:400; line-height:1.35;">
+          <input type="radio" name="consent" value="no" style="margin:0.2rem 0 0; justify-self:center;" />
+          <span>No, I do not give consent.</span>
         </label>
       </fieldset>
 
@@ -1222,11 +1224,13 @@ document.addEventListener('DOMContentLoaded', () => {
       <fieldset style="border:1px solid var(--border); border-radius:0.5rem; padding:0.75rem 0.9rem; margin:0;">
         <legend style="font-weight:600; padding:0 0.4rem;">Employee Acknowledgement <span style="color:#ef4444;">*</span></legend>
         <p class="muted small" style="margin:0.25rem 0 0.5rem;">As an employee of Xavier University, you are expected to read, understand, and familiarize yourself with the relevant laws and policies covered by this session, and to uphold their principles in the workplace and community.</p>
-        <label style="display:flex; align-items:center; gap:0.5rem; font-weight:400;">
-          <input type="radio" name="acknowledgement" value="yes" required /> I acknowledge and commit to comply.
+        <label style="display:grid; grid-template-columns: 1.1rem 1fr; align-items:start; column-gap:0.55rem; font-weight:400; line-height:1.35;">
+          <input type="radio" name="acknowledgement" value="yes" required style="margin:0.2rem 0 0; justify-self:center;" />
+          <span>I acknowledge and commit to comply.</span>
         </label>
-        <label style="display:flex; align-items:center; gap:0.5rem; font-weight:400;">
-          <input type="radio" name="acknowledgement" value="no" /> Not yet, but I intend to after further review or orientation.
+        <label style="display:grid; grid-template-columns: 1.1rem 1fr; align-items:start; column-gap:0.55rem; font-weight:400; line-height:1.35;">
+          <input type="radio" name="acknowledgement" value="no" style="margin:0.2rem 0 0; justify-self:center;" />
+          <span>Not yet, but I intend to after further review or orientation.</span>
         </label>
       </fieldset>
     `;
