@@ -511,6 +511,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const seriesRange = `${seriesFirst} – ${seriesLast}`;
 
         s.sessions.forEach((sess, idx) => {
+          if (sess.isHeld) return;
           const mandatoryLabel = s.mandatory ? 'Mandatory' : 'Optional';
           const shortDesc = truncate(s.description, 110);
           const capacity = Number(s.capacity || 0);

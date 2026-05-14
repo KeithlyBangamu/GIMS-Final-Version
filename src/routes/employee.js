@@ -256,11 +256,17 @@ router.get('/dashboard', async (req, res, next) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const seminars = await Seminar.find({ date: { $gte: today }, isDeleted: { $ne: true } })
+    const seminars = await Seminar.find({ date: { $gte: today }, isDeleted: { $ne: true }, isHeld: { $ne: true } })
       .sort({ date: 1, startTime: 1 })
       .populate('createdBy', 'name');
 
-    const upcomingSeminars = seminars.map((s) => {
+    const upcomingSeminars = seminars
+      .filter((s) => {
+        const sessionsArr = Array.isArray(s.sessions) ? s.sessions : [];
+        if (sessionsArr.length === 0) return true;
+        return !sessionsArr.every((sess) => sess.isHeld);
+      })
+      .map((s) => {
       const remaining = Math.max(0, (s.capacity || 0) - (Array.isArray(s.registeredEmployees) ? s.registeredEmployees.length : 0));
       return {
         id: s._id.toString(),
@@ -566,6 +572,12 @@ router.post('/seminars/:id/register', async (req, res, next) => {
       return res.status(404).json({ message: 'Seminar not found' });
     }
 
+    const sessionsArr = Array.isArray(seminar.sessions) ? seminar.sessions : [];
+    const allSessionsHeld = sessionsArr.length > 0 && sessionsArr.every((s) => s.isHeld);
+    if (seminar.isHeld || allSessionsHeld) {
+      return res.status(400).json({ message: 'Pre-registration is closed — this seminar has already been held.' });
+    }
+
     const employeeId = req.user.id;
 
     // Check if already registered in any state
@@ -590,6 +602,9 @@ router.post('/seminars/:id/register', async (req, res, next) => {
       const validSession = seminar.sessions.find((s) => String(s._id) === String(sessionId));
       if (!validSession) {
         return res.status(400).json({ message: 'The selected session does not exist for this seminar.' });
+      }
+      if (validSession.isHeld) {
+        return res.status(400).json({ message: 'The selected session has already been held.' });
       }
       chosenSessionId = validSession._id;
     }
