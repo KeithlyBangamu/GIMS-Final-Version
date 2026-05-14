@@ -673,7 +673,7 @@ router.get('/registrations/:registrationId/evaluation', async (req, res, next) =
     const registration = await Registration.findOne({
       _id: req.params.registrationId,
       employeeID: req.user.id,
-    }).populate('seminarID', 'title date startTime');
+    }).populate('seminarID', 'title description date startTime evaluationTopic evaluationReferences');
 
     if (!registration) return res.status(404).json({ message: 'Registration not found' });
 
@@ -689,8 +689,16 @@ router.get('/registrations/:registrationId/evaluation', async (req, res, next) =
         ? {
             id: registration.seminarID._id.toString(),
             title: registration.seminarID.title,
+            description: registration.seminarID.description || '',
             date: registration.seminarID.date,
             startTime: registration.seminarID.startTime,
+            evaluationTopic: registration.seminarID.evaluationTopic || '',
+            evaluationReferences: Array.isArray(registration.seminarID.evaluationReferences)
+              ? registration.seminarID.evaluationReferences.map((r) => ({
+                  label: r.label || '',
+                  shortName: r.shortName || '',
+                }))
+              : [],
           }
         : null,
       evaluation: existing || null,
@@ -717,18 +725,55 @@ router.post('/registrations/:registrationId/evaluation', async (req, res, next) 
       return res.status(400).json({ message: 'You have already submitted an evaluation for this seminar.' });
     }
 
-    const { rating, feedback, wouldRecommend } = req.body;
-    if (!rating || Number(rating) < 1 || Number(rating) > 5) {
-      return res.status(400).json({ message: 'Rating must be between 1 and 5.' });
+    const { ratings = {}, responses = {}, consent, acknowledgement } = req.body;
+
+    const inRange = (n) => Number.isFinite(n) && n >= 1 && n <= 5;
+    const overall = Number(ratings.overall);
+    if (!inRange(overall)) {
+      return res.status(400).json({ message: 'Overall rating must be between 1 and 5.' });
     }
+
+    const optionalRating = (v) => {
+      const n = Number(v);
+      return inRange(n) ? n : undefined;
+    };
+
+    const lessons = Array.isArray(responses.lessons)
+      ? responses.lessons
+          .map((l) => ({
+            referenceLabel: String(l?.referenceLabel || '').trim(),
+            referenceShortName: String(l?.referenceShortName || '').trim(),
+            answer: String(l?.answer || '').trim(),
+          }))
+          .filter((l) => l.referenceLabel || l.referenceShortName || l.answer)
+      : [];
 
     const evaluation = await Evaluation.create({
       registrationID: registration._id,
       seminarID: registration.seminarID,
       employeeID: req.user.id,
-      rating: Number(rating),
-      feedback: String(feedback || '').trim(),
-      wouldRecommend: wouldRecommend !== false && wouldRecommend !== 'false',
+      ratings: {
+        overall,
+        relevance: optionalRating(ratings.relevance),
+        facilitator: optionalRating(ratings.facilitator),
+        organization: optionalRating(ratings.organization),
+        interaction: optionalRating(ratings.interaction),
+        food: optionalRating(ratings.food),
+        venue: optionalRating(ratings.venue),
+        understanding: optionalRating(ratings.understanding),
+        applyLikelihood: optionalRating(ratings.applyLikelihood),
+      },
+      responses: {
+        relevanceContext: String(responses.relevanceContext || '').trim(),
+        lessons,
+        stop: String(responses.stop || '').trim(),
+        start: String(responses.start || '').trim(),
+        continueDoing: String(responses.continueDoing || '').trim(),
+        improvements: String(responses.improvements || '').trim(),
+      },
+      consent: consent === true || consent === 'true',
+      acknowledgement: acknowledgement === true || acknowledgement === 'true',
+      rating: overall,
       submittedAt: new Date(),
     });
 

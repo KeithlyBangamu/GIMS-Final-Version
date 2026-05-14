@@ -608,9 +608,19 @@ const buildValidatedSessions = (rawSessions, allowPast = false) => {
   return { sessions };
 };
 
+const normalizeEvaluationReferences = (raw) => {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((ref) => ({
+      label: String(ref?.label || '').trim(),
+      shortName: String(ref?.shortName || '').trim(),
+    }))
+    .filter((ref) => ref.label || ref.shortName);
+};
+
 router.post('/seminars', authMiddleware, async (req, res, next) => {
   try {
-    const { title, description, location, resourcePerson, mandatory, capacity, autoSendCertificates, certificateReleaseMode, multiSessionType } = req.body;
+    const { title, description, location, resourcePerson, mandatory, capacity, autoSendCertificates, certificateReleaseMode, multiSessionType, evaluationTopic, evaluationReferences } = req.body;
     if (!title || !description || !capacity) {
       return res.status(400).json({ message: 'Title, description, and capacity are required.' });
     }
@@ -640,6 +650,8 @@ router.post('/seminars', authMiddleware, async (req, res, next) => {
       autoSendCertificates: releaseMode === 'automatic',
       certificateReleaseMode: releaseMode,
       multiSessionType: resolvedSessionType,
+      evaluationTopic: String(evaluationTopic || '').trim(),
+      evaluationReferences: normalizeEvaluationReferences(evaluationReferences),
       createdBy: req.user.id,
     });
 
@@ -1205,7 +1217,7 @@ router.get('/employees/:employeeId/certificates/:registrationId/download', authM
 
 router.put('/seminars/:id', authMiddleware, async (req, res, next) => {
   try {
-    const { title, description, location, resourcePerson, mandatory, capacity, autoSendCertificates, certificateReleaseMode, multiSessionType } = req.body;
+    const { title, description, location, resourcePerson, mandatory, capacity, autoSendCertificates, certificateReleaseMode, multiSessionType, evaluationTopic, evaluationReferences } = req.body;
     if (!title || !description || !capacity) {
       return res.status(400).json({ message: 'Title, description, and capacity are required.' });
     }
@@ -1260,6 +1272,8 @@ router.put('/seminars/:id', authMiddleware, async (req, res, next) => {
     seminar.certificateReleaseMode = releaseMode;
     seminar.autoSendCertificates = releaseMode === 'automatic';
     seminar.multiSessionType = newSessions.length > 1 && multiSessionType === 'pick-one' ? 'pick-one' : 'all';
+    if (typeof evaluationTopic !== 'undefined') seminar.evaluationTopic = String(evaluationTopic || '').trim();
+    if (typeof evaluationReferences !== 'undefined') seminar.evaluationReferences = normalizeEvaluationReferences(evaluationReferences);
 
     await seminar.save();
     res.json(seminar);

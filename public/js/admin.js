@@ -1510,6 +1510,47 @@ document.addEventListener('DOMContentLoaded', () => {
     if (seminarReportContentEl) seminarReportContentEl.innerHTML = '<p class="muted">Loading report…</p>';
   };
 
+  const buildEvalRefsRepeater = (mode) => {
+    const listEl = document.getElementById(`${mode}-eval-refs-list`);
+    const addBtn = document.getElementById(`${mode}-eval-refs-add`);
+    if (!listEl || !addBtn) return { render: () => {}, collect: () => [], clear: () => {} };
+
+    const rowHtml = (label = '', shortName = '') => {
+      const row = document.createElement('div');
+      row.className = 'eval-ref-row';
+      row.style.cssText = 'display:flex; gap:0.4rem; align-items:center;';
+      row.innerHTML = `
+        <input type="text" class="eval-ref-label" placeholder="e.g. Republic Act No. 7877" value="${escapeHtml(label)}" style="flex:1; min-width:160px;" />
+        <input type="text" class="eval-ref-short" placeholder="e.g. Anti-Sexual Harassment Act" value="${escapeHtml(shortName)}" style="flex:1; min-width:160px;" />
+        <button type="button" class="btn secondary eval-ref-remove" title="Remove" style="padding:0.3rem 0.6rem;">×</button>
+      `;
+      row.querySelector('.eval-ref-remove').addEventListener('click', () => row.remove());
+      return row;
+    };
+
+    const render = (refs) => {
+      listEl.innerHTML = '';
+      const list = Array.isArray(refs) ? refs : [];
+      for (const r of list) listEl.appendChild(rowHtml(r.label, r.shortName));
+    };
+    const collect = () =>
+      Array.from(listEl.querySelectorAll('.eval-ref-row'))
+        .map((row) => ({
+          label: row.querySelector('.eval-ref-label')?.value?.trim() || '',
+          shortName: row.querySelector('.eval-ref-short')?.value?.trim() || '',
+        }))
+        .filter((r) => r.label || r.shortName);
+    const clear = () => {
+      listEl.innerHTML = '';
+    };
+
+    addBtn.addEventListener('click', () => listEl.appendChild(rowHtml()));
+    return { render, collect, clear };
+  };
+
+  const createEvalRefs = buildEvalRefsRepeater('create');
+  const editEvalRefs = buildEvalRefsRepeater('edit');
+
   const openSeminarEditModal = (seminar) => {
     if (!seminarEditForm || !seminarEditModalEl) return;
     seminarEditForm.elements.seminarId.value = seminar._id;
@@ -1519,6 +1560,8 @@ document.addEventListener('DOMContentLoaded', () => {
     seminarEditForm.elements.description.value = seminar.description || '';
     if (seminarEditForm.elements.location) seminarEditForm.elements.location.value = seminar.location || '';
     if (seminarEditForm.elements.resourcePerson) seminarEditForm.elements.resourcePerson.value = seminar.resourcePerson || '';
+    if (seminarEditForm.elements.evaluationTopic) seminarEditForm.elements.evaluationTopic.value = seminar.evaluationTopic || '';
+    editEvalRefs.render(seminar.evaluationReferences || []);
     const editAutoSendCheckbox = document.getElementById('edit-auto-send-cert-checkbox');
     if (editAutoSendCheckbox) editAutoSendCheckbox.checked = Boolean(seminar.autoSendCertificates);
 
@@ -2446,6 +2489,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   createSeminarClearBtn?.addEventListener('click', () => {
     createSeminarForm?.reset();
+    createEvalRefs.clear();
     if (createSeminarStatusEl) createSeminarStatusEl.textContent = '';
     calState.create.sessions = new Map();
     const toggle = document.getElementById('create-multi-session-toggle');
@@ -2606,6 +2650,8 @@ document.addEventListener('DOMContentLoaded', () => {
       capacity: formBody.capacity,
       autoSendCertificates,
       certificateReleaseMode: autoSendCertificates === 'true' ? 'automatic' : 'evaluation',
+      evaluationTopic: formBody.evaluationTopic || '',
+      evaluationReferences: editEvalRefs.collect(),
     };
 
     if (isMulti) {
@@ -2693,6 +2739,8 @@ document.addEventListener('DOMContentLoaded', () => {
       mandatory: body.mandatory,
       certificateReleaseMode: releaseMode,
       autoSendCertificates: releaseMode === 'automatic' ? 'true' : 'false',
+      evaluationTopic: body.evaluationTopic || '',
+      evaluationReferences: createEvalRefs.collect(),
     };
 
     if (isMulti) {
@@ -2725,6 +2773,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) throw new Error(data?.message || 'Seminar creation failed');
       if (createSeminarStatusEl) createSeminarStatusEl.textContent = 'Seminar created successfully.';
       createSeminarForm.reset();
+      createEvalRefs.clear();
       calState.create.sessions = new Map();
       const toggle = document.getElementById('create-multi-session-toggle');
       if (toggle) toggle.checked = false;

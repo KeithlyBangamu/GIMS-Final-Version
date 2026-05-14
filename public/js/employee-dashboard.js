@@ -125,11 +125,9 @@ document.addEventListener('DOMContentLoaded', () => {
     evalBackdrop: document.getElementById('eval-modal-backdrop'),
     evalTitle: document.getElementById('eval-modal-title'),
     evalSeminarName: document.getElementById('eval-modal-seminar-name'),
+    evalSeminarDesc: document.getElementById('eval-modal-seminar-desc'),
     evalForm: document.getElementById('eval-form'),
-    evalStars: document.getElementById('eval-stars'),
-    evalRatingInput: document.getElementById('eval-rating'),
-    evalFeedback: document.getElementById('eval-feedback'),
-    evalRecommend: document.getElementById('eval-recommend'),
+    evalFormBody: document.getElementById('eval-form-body'),
     evalSubmitBtn: document.getElementById('eval-submit-btn'),
     evalModalClose: document.getElementById('eval-modal-close'),
     evalModalCancel: document.getElementById('eval-modal-cancel'),
@@ -1135,43 +1133,128 @@ document.addEventListener('DOMContentLoaded', () => {
   // EVALUATION MODAL
   // ========================
 
-  let currentEvalRating = 0;
-
-  const updateStars = (rating) => {
-    if (!el.evalStars) return;
-    el.evalStars.querySelectorAll('.eval-star-btn').forEach((btn) => {
-      const star = Number(btn.getAttribute('data-star'));
-      btn.style.color = star <= rating ? '#f59e0b' : '#d1d5db';
-    });
-    if (el.evalRatingInput) el.evalRatingInput.value = String(rating);
-    currentEvalRating = rating;
+  const RATING_SCALES = {
+    quality: ['1 - Poor', '2 - Fair', '3 - Good', '4 - Very Good', '5 - Excellent'],
+    relevance: ['1 - Not Relevant', '2 - Somewhat Relevant', '3 - Relevant', '4 - Very Relevant', '5 - Extremely Relevant'],
+    likelihood: ['1 - Very Unlikely', '2 - Unlikely', '3 - Undecided / Neutral', '4 - Likely', '5 - Very Likely'],
   };
 
-  el.evalStars?.querySelectorAll('.eval-star-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const star = Number(btn.getAttribute('data-star'));
-      updateStars(star);
-    });
-    btn.addEventListener('mouseenter', () => {
-      const star = Number(btn.getAttribute('data-star'));
-      el.evalStars.querySelectorAll('.eval-star-btn').forEach((b) => {
-        b.style.color = Number(b.getAttribute('data-star')) <= star ? '#f59e0b' : '#d1d5db';
-      });
-    });
-    btn.addEventListener('mouseleave', () => {
-      updateStars(currentEvalRating);
-    });
-  });
+  const buildScaleRow = (name, scaleKey) => {
+    const opts = RATING_SCALES[scaleKey] || RATING_SCALES.quality;
+    return opts
+      .map(
+        (label, i) => `
+        <label style="display:flex; align-items:center; gap:0.4rem; font-weight:400;">
+          <input type="radio" name="${name}" value="${i + 1}" required />
+          <span>${escapeHtml(label)}</span>
+        </label>`
+      )
+      .join('');
+  };
 
-  const openEvalModal = (registrationId, seminarName) => {
+  const buildScaleQuestion = (name, question, scaleKey) => `
+    <fieldset style="border:1px solid var(--border); border-radius:0.5rem; padding:0.75rem 0.9rem; margin:0;">
+      <legend style="font-weight:600; padding:0 0.4rem;">${escapeHtml(question)} <span style="color:#ef4444;">*</span></legend>
+      <div style="display:flex; flex-direction:column; gap:0.35rem; margin-top:0.35rem;">
+        ${buildScaleRow(name, scaleKey)}
+      </div>
+    </fieldset>
+  `;
+
+  const buildTextQuestion = (name, question, required = false, placeholder = '') => `
+    <label style="display:block;">
+      <span style="font-weight:600;">${escapeHtml(question)}${required ? ' <span style="color:#ef4444;">*</span>' : ''}</span>
+      <textarea name="${name}" rows="3" ${required ? 'required' : ''} placeholder="${escapeHtml(placeholder)}" style="margin-top:0.35rem; width:100%;"></textarea>
+    </label>
+  `;
+
+  const renderEvalForm = ({ topic, references }) => {
+    if (!el.evalFormBody) return;
+    const subject = topic ? topic.trim() : '';
+    const subjectPhrase = subject || 'the seminar topic';
+
+    const lessonsHtml = (references || [])
+      .map((ref, i) => {
+        const labelText = ref.shortName
+          ? `${ref.label} or the ${ref.shortName}`
+          : ref.label;
+        return buildTextQuestion(
+          `lesson_${i}`,
+          `What is the most important lesson you have learned about ${labelText} so far?`,
+          true
+        ) + `<input type="hidden" name="lesson_label_${i}" value="${escapeHtml(ref.label || '')}" /><input type="hidden" name="lesson_short_${i}" value="${escapeHtml(ref.shortName || '')}" />`;
+      })
+      .join('');
+
+    el.evalFormBody.innerHTML = `
+      <fieldset style="border:1px solid var(--border); border-radius:0.5rem; padding:0.75rem 0.9rem; margin:0;">
+        <legend style="font-weight:600; padding:0 0.4rem;">Data Privacy & Informed Consent <span style="color:#ef4444;">*</span></legend>
+        <p class="muted small" style="margin:0.25rem 0 0.5rem;">All personal/sensitive information will be kept confidential. By selecting "Yes" you give consent to the organizers to store and use necessary information in accordance with R.A. 10173 (Data Privacy Act of 2012).</p>
+        <label style="display:flex; align-items:center; gap:0.5rem; font-weight:400;">
+          <input type="radio" name="consent" value="yes" required /> Yes, I give my consent.
+        </label>
+        <label style="display:flex; align-items:center; gap:0.5rem; font-weight:400;">
+          <input type="radio" name="consent" value="no" /> No, I do not give consent.
+        </label>
+      </fieldset>
+
+      ${buildScaleQuestion('overall', 'Overall, how would you rate the session?', 'quality')}
+      ${buildScaleQuestion('relevance', 'How relevant was the session content to the objectives?', 'relevance')}
+      ${buildScaleQuestion('facilitator', "How would you rate the resource facilitator's delivery and ability to engage the participants?", 'quality')}
+      ${buildScaleQuestion('organization', 'How would you rate the design or organization of the session?', 'quality')}
+      ${buildScaleQuestion('interaction', 'How would you rate the opportunities or avenues provided for participation and interaction?', 'quality')}
+      ${buildScaleQuestion('food', 'How would you rate the food served during the session?', 'quality')}
+      ${buildScaleQuestion('venue', 'How would you rate the venue of the session?', 'quality')}
+      ${buildScaleQuestion('understanding', `To what extent did the session improve your understanding of ${subjectPhrase}?`, 'quality')}
+
+      ${buildTextQuestion('relevanceContext', 'What is the relevance of the information presented to your personal or professional context?')}
+
+      ${lessonsHtml}
+
+      ${buildScaleQuestion('applyLikelihood', 'How likely are you to apply the knowledge gained in real-life situations (e.g., reporting, intervention, prevention)?', 'likelihood')}
+
+      ${buildTextQuestion('stop', `What should you STOP doing to ensure you are not contributing to ${subjectPhrase} in any way?`, true)}
+      ${buildTextQuestion('start', `What actions should you START taking to help prevent ${subjectPhrase} in your community?`, true)}
+      ${buildTextQuestion('continueDoing', `What have you been doing that you want to CONTINUE to prevent ${subjectPhrase}?`, true)}
+      ${buildTextQuestion('improvements', 'What areas could be improved for future sessions?', true)}
+
+      <fieldset style="border:1px solid var(--border); border-radius:0.5rem; padding:0.75rem 0.9rem; margin:0;">
+        <legend style="font-weight:600; padding:0 0.4rem;">Employee Acknowledgement <span style="color:#ef4444;">*</span></legend>
+        <p class="muted small" style="margin:0.25rem 0 0.5rem;">As an employee of Xavier University, you are expected to read, understand, and familiarize yourself with the relevant laws and policies covered by this session, and to uphold their principles in the workplace and community.</p>
+        <label style="display:flex; align-items:center; gap:0.5rem; font-weight:400;">
+          <input type="radio" name="acknowledgement" value="yes" required /> I acknowledge and commit to comply.
+        </label>
+        <label style="display:flex; align-items:center; gap:0.5rem; font-weight:400;">
+          <input type="radio" name="acknowledgement" value="no" /> Not yet, but I intend to after further review or orientation.
+        </label>
+      </fieldset>
+    `;
+  };
+
+  const openEvalModal = async (registrationId, seminarName) => {
     currentEvalRegistrationId = registrationId;
-    currentEvalRating = 0;
-    updateStars(0);
-    if (el.evalFeedback) el.evalFeedback.value = '';
-    if (el.evalRecommend) el.evalRecommend.checked = true;
     if (el.evalModalStatus) el.evalModalStatus.textContent = '';
     if (el.evalSeminarName) el.evalSeminarName.textContent = seminarName || '';
+    if (el.evalSeminarDesc) el.evalSeminarDesc.textContent = '';
+    if (el.evalFormBody) el.evalFormBody.innerHTML = '<p class="muted">Loading…</p>';
     if (el.evalBackdrop) el.evalBackdrop.style.display = 'flex';
+
+    try {
+      const res = await authedFetch(`/api/employee/registrations/${registrationId}/evaluation`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || 'Failed to load evaluation form.');
+      const seminar = data?.seminar || {};
+      if (el.evalSeminarName) el.evalSeminarName.textContent = seminar.title || seminarName || '';
+      if (el.evalSeminarDesc) el.evalSeminarDesc.textContent = seminar.description || '';
+      renderEvalForm({
+        topic: seminar.evaluationTopic || '',
+        references: Array.isArray(seminar.evaluationReferences) ? seminar.evaluationReferences : [],
+      });
+    } catch (err) {
+      console.error('[employee-dashboard] load evaluation context failed', err);
+      if (el.evalFormBody) el.evalFormBody.innerHTML = '';
+      if (el.evalModalStatus) el.evalModalStatus.textContent = err.message || 'Failed to load evaluation form.';
+    }
   };
 
   const closeEvalModal = () => {
@@ -1187,11 +1270,51 @@ document.addEventListener('DOMContentLoaded', () => {
 
   el.evalForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!currentEvalRegistrationId) return;
-    if (!currentEvalRating) {
-      if (el.evalModalStatus) el.evalModalStatus.textContent = 'Please select a rating.';
+    if (!currentEvalRegistrationId || !el.evalForm) return;
+
+    const fd = new FormData(el.evalForm);
+    const consent = fd.get('consent');
+    if (consent !== 'yes') {
+      if (el.evalModalStatus) el.evalModalStatus.textContent = 'You must give consent to submit this evaluation.';
       return;
     }
+    const acknowledgement = fd.get('acknowledgement') === 'yes';
+
+    const ratingFields = ['overall', 'relevance', 'facilitator', 'organization', 'interaction', 'food', 'venue', 'understanding', 'applyLikelihood'];
+    const ratings = {};
+    for (const f of ratingFields) {
+      const v = fd.get(f);
+      if (v) ratings[f] = Number(v);
+    }
+    if (!ratings.overall) {
+      if (el.evalModalStatus) el.evalModalStatus.textContent = 'Please complete all required rating questions.';
+      return;
+    }
+
+    const lessons = [];
+    let i = 0;
+    while (fd.has(`lesson_${i}`)) {
+      lessons.push({
+        referenceLabel: String(fd.get(`lesson_label_${i}`) || ''),
+        referenceShortName: String(fd.get(`lesson_short_${i}`) || ''),
+        answer: String(fd.get(`lesson_${i}`) || '').trim(),
+      });
+      i += 1;
+    }
+
+    const payload = {
+      consent: true,
+      acknowledgement,
+      ratings,
+      responses: {
+        relevanceContext: String(fd.get('relevanceContext') || '').trim(),
+        lessons,
+        stop: String(fd.get('stop') || '').trim(),
+        start: String(fd.get('start') || '').trim(),
+        continueDoing: String(fd.get('continueDoing') || '').trim(),
+        improvements: String(fd.get('improvements') || '').trim(),
+      },
+    };
 
     if (el.evalSubmitBtn) el.evalSubmitBtn.disabled = true;
     if (el.evalModalStatus) el.evalModalStatus.textContent = 'Submitting…';
@@ -1200,11 +1323,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await authedFetch(`/api/employee/registrations/${currentEvalRegistrationId}/evaluation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          rating: currentEvalRating,
-          feedback: el.evalFeedback?.value || '',
-          wouldRecommend: el.evalRecommend?.checked !== false,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || 'Failed to submit evaluation');
@@ -1216,6 +1335,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error('[employee-dashboard] submit evaluation failed', err);
       if (el.evalModalStatus) el.evalModalStatus.textContent = err.message || 'Submission failed.';
+      if (el.evalSubmitBtn) el.evalSubmitBtn.disabled = false;
+    } finally {
       if (el.evalSubmitBtn) el.evalSubmitBtn.disabled = false;
     }
   });
