@@ -358,11 +358,32 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Mark all read
-  el.notifReadAllBtn?.addEventListener('click', async () => {
+  el.notifReadAllBtn?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    el.notifReadAllBtn.disabled = true;
     try {
-      await authedFetch('/api/employee/notifications/read-all', { method: 'PUT' });
+      const res = await authedFetch('/api/employee/notifications/read-all', { method: 'PUT' });
+      if (!res.ok) {
+        let msg = 'Failed to mark all as read.';
+        try {
+          const data = await res.json();
+          msg = data?.message || msg;
+        } catch {}
+        console.error('[notif] mark-all-read failed', res.status, msg);
+      }
+      // Optimistically clear unread styling immediately so the user sees a result
+      el.notifList?.querySelectorAll('.notif-item.unread').forEach((item) => {
+        item.classList.remove('unread');
+        const dot = item.querySelector('.notif-dot');
+        if (dot) dot.remove();
+      });
+      if (el.notifBadge) el.notifBadge.style.display = 'none';
       await loadNotifications();
-    } catch {}
+    } catch (err) {
+      console.error('[notif] mark-all-read error', err);
+    } finally {
+      el.notifReadAllBtn.disabled = false;
+    }
   });
 
   // Clear all notifications

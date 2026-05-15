@@ -644,6 +644,20 @@ router.get('/notifications', async (req, res, next) => {
   }
 });
 
+// Mark all notifications as read (must be registered BEFORE /:id/read so Express
+// never tries to interpret "read-all" as an :id parameter)
+router.put('/notifications/read-all', async (req, res, next) => {
+  try {
+    const result = await Notification.updateMany(
+      { employeeID: req.user.id, read: false },
+      { $set: { read: true } }
+    );
+    res.json({ message: 'All notifications marked as read', modified: result.modifiedCount || 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Mark a notification as read
 router.put('/notifications/:id/read', async (req, res, next) => {
   try {
@@ -654,19 +668,6 @@ router.put('/notifications/:id/read', async (req, res, next) => {
     );
     if (!notification) return res.status(404).json({ message: 'Notification not found' });
     res.json(notification);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// Mark all notifications as read
-router.put('/notifications/read-all', async (req, res, next) => {
-  try {
-    await Notification.updateMany(
-      { employeeID: req.user.id, read: false },
-      { $set: { read: true } }
-    );
-    res.json({ message: 'All notifications marked as read' });
   } catch (err) {
     next(err);
   }
