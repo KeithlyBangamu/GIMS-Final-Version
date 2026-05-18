@@ -1330,7 +1330,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Seminar</span>${escapeHtml(cert?.title || 'Untitled seminar')}</div>
                 <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Seminar Date</span>${escapeHtml(datePart)}${timePart ? ` • ${escapeHtml(timePart)}` : ''}</div>
                 <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Evaluation</span>${escapeHtml(evalDone)}</div>
-                <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Registration ID</span><span style="font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:0.78rem;">${escapeHtml(cert?.registrationId || '')}</span></div>
               </div>
             </div>
           </div>
