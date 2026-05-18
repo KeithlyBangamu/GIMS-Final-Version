@@ -1068,7 +1068,28 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.addEventListener('click', async () => {
         const registrationId = btn.getAttribute('data-download-cert');
         if (!registrationId) return;
-        await downloadCertificate(registrationId);
+        if (btn.dataset.busy === '1') return;
+        btn.dataset.busy = '1';
+        btn.disabled = true;
+        const originalLabel = btn.textContent;
+        btn.textContent = 'Preparing… (5s)';
+        let remaining = 5;
+        const countdown = setInterval(() => {
+          remaining -= 1;
+          if (remaining > 0) btn.textContent = `Preparing… (${remaining}s)`;
+          else {
+            btn.textContent = 'Generating certificate…';
+            clearInterval(countdown);
+          }
+        }, 1000);
+        try {
+          await downloadCertificate(registrationId);
+        } finally {
+          clearInterval(countdown);
+          btn.textContent = originalLabel;
+          btn.disabled = false;
+          delete btn.dataset.busy;
+        }
       });
     });
 

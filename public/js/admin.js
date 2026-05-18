@@ -1287,6 +1287,20 @@ document.addEventListener('DOMContentLoaded', () => {
       button.addEventListener('click', async () => {
         const registrationId = button.getAttribute('data-admin-cert-download');
         if (!registrationId || !employeeId) return;
+        if (button.dataset.busy === '1') return;
+        button.dataset.busy = '1';
+        button.disabled = true;
+        const originalLabel = button.textContent;
+        button.textContent = 'Preparing… (5s)';
+        let remaining = 5;
+        const countdown = setInterval(() => {
+          remaining -= 1;
+          if (remaining > 0) button.textContent = `Preparing… (${remaining}s)`;
+          else {
+            button.textContent = 'Generating…';
+            clearInterval(countdown);
+          }
+        }, 1000);
         try {
           const res = await authedFetch(`/api/admin/employees/${employeeId}/certificates/${registrationId}/download`);
           if (!res.ok) {
@@ -1309,6 +1323,11 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
           console.error('[admin] certificate download failed', err);
           if (profileModalStatusEl) profileModalStatusEl.textContent = err.message || 'Certificate download failed.';
+        } finally {
+          clearInterval(countdown);
+          button.textContent = originalLabel;
+          button.disabled = false;
+          delete button.dataset.busy;
         }
       });
     });

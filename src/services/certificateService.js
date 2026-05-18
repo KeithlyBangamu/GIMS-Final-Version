@@ -189,13 +189,18 @@ export const buildCertificateHtml = ({
 };
 
 export const renderCertificateBuffer = async ({ html }) => {
+  // NOTE: --single-process was previously set but is unstable on Render/low-mem
+  // environments and was the source of intermittent "TargetCloseError: Target
+  // closed" crashes (returned to the client as 502 Bad Gateway).
   const launchOptions = {
     headless: true,
+    protocolTimeout: 60_000,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--single-process',
+      '--disable-gpu',
+      '--no-zygote',
     ],
   };
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
@@ -205,11 +210,15 @@ export const renderCertificateBuffer = async ({ html }) => {
 
   try {
     const page = await browser.newPage();
+    page.setDefaultNavigationTimeout(45_000);
+    page.setDefaultTimeout(45_000);
     await page.setViewport({ width: 1754, height: 1240, deviceScaleFactor: 1 });
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    return page.screenshot({ type: 'png', fullPage: false });
+    // The certificate HTML has no external network resources, so
+    // 'domcontentloaded' is sufficient and avoids networkidle0 hangs.
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    return await page.screenshot({ type: 'png', fullPage: false });
   } finally {
-    await browser.close();
+    try { await browser.close(); } catch { /* ignore close errors */ }
   }
 };
 
