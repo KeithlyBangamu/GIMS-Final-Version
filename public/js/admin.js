@@ -371,6 +371,40 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${hours}:${minutes}\u00A0${period}`;
   };
 
+  /**
+   * Returns the latest end-time (Date) for a seminar, or null if it cannot be
+   * determined. For multi-session seminars this is the end of the last session;
+   * for single-day seminars it's date + startTime + durationHours.
+   */
+  const getSeminarEndTime = (seminar) => {
+    if (!seminar) return null;
+    const sessions = Array.isArray(seminar.sessions) && seminar.sessions.length > 0
+      ? seminar.sessions
+      : [{ date: seminar.date, startTime: seminar.startTime, durationHours: seminar.durationHours }];
+    let latest = null;
+    for (const sess of sessions) {
+      if (!sess?.date) continue;
+      const d = new Date(sess.date);
+      if (Number.isNaN(d.getTime())) continue;
+      const m = /^(\d{1,2}):(\d{2})$/.exec(String(sess.startTime || '').trim());
+      if (m) {
+        d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+      }
+      const duration = Number(sess.durationHours || 0);
+      if (duration > 0) {
+        d.setTime(d.getTime() + duration * 60 * 60 * 1000);
+      }
+      if (!latest || d.getTime() > latest.getTime()) latest = d;
+    }
+    return latest;
+  };
+
+  const hasSeminarTimeElapsed = (seminar) => {
+    const end = getSeminarEndTime(seminar);
+    if (!end) return true; // unknown — don't block
+    return Date.now() >= end.getTime();
+  };
+
   /** Multi-day seminar: list each session date & time (Manage Seminars cards). */
   const buildAdminSessionsScheduleBlock = (sessions, opts = {}) => {
     if (!Array.isArray(sessions) || sessions.length <= 1) return '';
@@ -1947,8 +1981,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Update attendance buttons
       if (seminarHeldBtn) {
-        seminarHeldBtn.disabled = false;
+        const elapsed = hasSeminarTimeElapsed(seminar);
+        const blocked = !isHeld && !elapsed;
+        seminarHeldBtn.disabled = blocked;
         seminarHeldBtn.textContent = isHeld ? 'Unmark Held' : 'Mark as Held';
+        seminarHeldBtn.title = blocked
+          ? `Available after the seminar end time (${formatDate(getSeminarEndTime(seminar))}).`
+          : '';
       }
       if (markAttendanceBtn) markAttendanceBtn.disabled = !isHeld;
       if (sendCertificatesBtn) sendCertificatesBtn.disabled = !isHeld || !attendanceModalState.attendanceSaved;
@@ -2019,7 +2058,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             <div style="${actionGroupStyle}">
               <button class="btn secondary" type="button" data-seminar-view="${seminar._id}" style="${wideButtonStyle}">View Participants</button>
-              <button class="btn secondary" type="button" data-seminar-held="${seminar._id}" style="${wideButtonStyle}">${seminar.isHeld ? 'Unmark Held' : 'Mark as Held'}</button>
+              ${(() => {
+                const elapsed = hasSeminarTimeElapsed(seminar);
+                const disable = !seminar.isHeld && !elapsed;
+                const title = disable
+                  ? `Available after the seminar end time (${formatDate(getSeminarEndTime(seminar))}).`
+                  : '';
+                return `<button class="btn secondary" type="button" data-seminar-held="${seminar._id}" style="${wideButtonStyle}" ${disable ? 'disabled aria-disabled="true"' : ''} title="${escapeHtml(title)}">${seminar.isHeld ? 'Unmark Held' : 'Mark as Held'}</button>`;
+              })()}
               <button class="btn secondary" type="button" data-seminar-evals="${seminar._id}" style="${wideButtonStyle}">Evaluations</button>
               <button class="btn" type="button" data-seminar-edit="${seminar._id}" style="${shortButtonStyle}">Edit</button>
               <button class="btn secondary" type="button" data-seminar-delete="${seminar._id}" style="${shortButtonStyle}">Delete</button>
@@ -2057,6 +2103,13 @@ document.addEventListener('DOMContentLoaded', () => {
       button.addEventListener('click', async () => {
         const seminar = currentSeminars.find((item) => String(item._id) === String(button.getAttribute('data-seminar-held')));
         if (!seminar) return;
+        if (!seminar.isHeld && !hasSeminarTimeElapsed(seminar)) {
+          if (seminarsStatusEl) {
+            const end = getSeminarEndTime(seminar);
+            seminarsStatusEl.textContent = `Cannot mark as held yet — seminar ends ${formatDate(end)}.`;
+          }
+          return;
+        }
         try {
           const targetHeld = !seminar.isHeld;
           const res = await authedFetch(`/api/admin/seminars/${seminar._id}/held`, {
@@ -2733,6 +2786,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   seminarHeldBtn?.addEventListener('click', async () => {
     if (!attendanceModalState.seminarId) return;
+    const seminar = currentSeminars.find((item) => String(item._id) === String(attendanceModalState.seminarId));
+    if (seminar && !seminar.isHeld && !hasSeminarTimeElapsed(seminar)) {
+      if (seminarParticipantsStatusEl) {
+        const end = getSeminarEndTime(seminar);
+        seminarParticipantsStatusEl.textContent = `Cannot mark as held yet — seminar ends ${formatDate(end)}.`;
+      }
+      return;
+    }
     try {
       const targetHeld = !attendanceModalState.isHeld;
       const res = await authedFetch(`/api/admin/seminars/${attendanceModalState.seminarId}/held`, {

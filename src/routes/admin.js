@@ -1043,6 +1043,26 @@ router.post('/seminars/:id/held', authMiddleware, async (req, res, next) => {
     const desired = (req.body && (req.body.isHeld ?? req.body.held));
     const targetHeld = typeof desired === 'boolean' ? desired : true;
     if (targetHeld && !seminar.isHeld) {
+      // Guard: cannot mark held until the seminar's end time has passed.
+      const sessions = Array.isArray(seminar.sessions) && seminar.sessions.length > 0
+        ? seminar.sessions
+        : [{ date: seminar.date, startTime: seminar.startTime, durationHours: seminar.durationHours }];
+      let latestEnd = null;
+      for (const sess of sessions) {
+        if (!sess?.date) continue;
+        const d = new Date(sess.date);
+        if (Number.isNaN(d.getTime())) continue;
+        const m = /^(\d{1,2}):(\d{2})$/.exec(String(sess.startTime || '').trim());
+        if (m) d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+        const duration = Number(sess.durationHours || 0);
+        if (duration > 0) d.setTime(d.getTime() + duration * 60 * 60 * 1000);
+        if (!latestEnd || d.getTime() > latestEnd.getTime()) latestEnd = d;
+      }
+      if (latestEnd && Date.now() < latestEnd.getTime()) {
+        return res.status(400).json({
+          message: `Cannot mark as held yet — seminar ends ${latestEnd.toLocaleString()}.`,
+        });
+      }
       seminar.isHeld = true;
       seminar.heldAt = new Date();
       await seminar.save();
