@@ -1305,73 +1305,48 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     profileCertificatesListEl.innerHTML = certificates
-      .map((cert) => {
+      .map((cert, idx) => {
         const datePart = cert?.date ? formatDate(cert.date) : 'No date';
-        const issuedPart = cert?.certificateIssuedAt ? formatDate(cert.certificateIssuedAt) : 'Not issued';
+        const timePart = cert?.startTime ? formatTime(cert.startTime) : '';
+        const issuedAt = cert?.certificateIssuedAt ? new Date(cert.certificateIssuedAt) : null;
+        const issuedStr = issuedAt && !Number.isNaN(issuedAt.getTime()) ? issuedAt.toLocaleString() : 'Not issued';
+        const code = cert?.certificateCode || 'Pending';
+        const evalDone = cert?.evaluationCompleted ? 'Completed' : (cert?.evaluationAvailable ? 'Pending' : 'Not required');
+        const detailsId = `admin-cert-details-${idx}`;
         return `
           <div style="padding: 0.45rem 0.55rem; border:1px solid var(--border); border-radius:0.55rem; background:#fff;">
             <div style="display:flex; justify-content:space-between; gap:0.6rem; align-items:center; flex-wrap:wrap;">
               <div>
                 <div style="font-weight:600; color:var(--xu-blue);">${escapeHtml(cert?.title || 'Untitled seminar')}</div>
-                <div class="muted small" style="margin-top:0.12rem;">${escapeHtml(datePart)} • Code: ${escapeHtml(cert?.certificateCode || 'Pending')}</div>
+                <div class="muted small" style="margin-top:0.12rem;">${escapeHtml(datePart)} • Code: ${escapeHtml(code)}</div>
               </div>
-              <button class="btn secondary" type="button" data-admin-cert-download="${escapeHtml(cert?.registrationId || '')}" style="padding:0.35rem 0.65rem;">Download</button>
+              <button class="btn secondary" type="button" data-admin-cert-details="${escapeHtml(detailsId)}" aria-expanded="false" aria-controls="${escapeHtml(detailsId)}" style="padding:0.35rem 0.65rem;">View Details</button>
             </div>
-            <div class="muted small" style="margin-top:0.15rem;">Issued: ${escapeHtml(issuedPart)}</div>
+            <div class="muted small" style="margin-top:0.15rem;">Issued: ${escapeHtml(issuedStr)}</div>
+            <div id="${escapeHtml(detailsId)}" data-admin-cert-details-panel style="display:none; margin-top:0.55rem; padding-top:0.55rem; border-top:1px dashed var(--border);">
+              <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:0.35rem 0.9rem; font-size:0.88rem;">
+                <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Certificate Code</span><span style="font-family:ui-monospace, SFMono-Regular, Menlo, monospace;">${escapeHtml(code)}</span></div>
+                <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Issued At</span>${escapeHtml(issuedStr)}</div>
+                <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Seminar</span>${escapeHtml(cert?.title || 'Untitled seminar')}</div>
+                <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Seminar Date</span>${escapeHtml(datePart)}${timePart ? ` • ${escapeHtml(timePart)}` : ''}</div>
+                <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Evaluation</span>${escapeHtml(evalDone)}</div>
+                <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Registration ID</span><span style="font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:0.78rem;">${escapeHtml(cert?.registrationId || '')}</span></div>
+              </div>
+            </div>
           </div>
         `;
       })
       .join('');
 
-    profileCertificatesListEl.querySelectorAll('[data-admin-cert-download]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const registrationId = button.getAttribute('data-admin-cert-download');
-        if (!registrationId || !employeeId) return;
-        if (button.dataset.busy === '1') return;
-        button.dataset.busy = '1';
-        button.disabled = true;
-        const start = Date.now();
-        let tick = null;
-        if (profileModalStatusEl) {
-          profileModalStatusEl.textContent = 'Preparing certificate… 0s';
-          tick = setInterval(() => {
-            const secs = Math.floor((Date.now() - start) / 1000);
-            profileModalStatusEl.textContent = `Preparing certificate… ${secs}s (this usually takes ~5–10s)`;
-          }, 1000);
-        }
-        try {
-          const res = await authedFetch(`/api/admin/employees/${employeeId}/certificates/${registrationId}/download`);
-          if (!res.ok) {
-            const text = await res.text();
-            throw new Error(text || 'Certificate download failed.');
-          }
-
-          const blob = await res.blob();
-          const disposition = res.headers.get('content-disposition') || '';
-          const match = /filename="?([^";]+)"?/i.exec(disposition);
-          const name = match?.[1] || `GIMS-Certificate-${registrationId}.png`;
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = name;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          if (profileModalStatusEl) {
-            profileModalStatusEl.textContent = 'Certificate downloaded.';
-            setTimeout(() => {
-              if (profileModalStatusEl) profileModalStatusEl.textContent = '';
-            }, 3000);
-          }
-        } catch (err) {
-          console.error('[admin] certificate download failed', err);
-          if (profileModalStatusEl) profileModalStatusEl.textContent = err.message || 'Certificate download failed.';
-        } finally {
-          if (tick) clearInterval(tick);
-          button.disabled = false;
-          delete button.dataset.busy;
-        }
+    profileCertificatesListEl.querySelectorAll('[data-admin-cert-details]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const targetId = button.getAttribute('data-admin-cert-details');
+        const panel = targetId ? document.getElementById(targetId) : null;
+        if (!panel) return;
+        const open = panel.style.display !== 'none';
+        panel.style.display = open ? 'none' : 'block';
+        button.setAttribute('aria-expanded', open ? 'false' : 'true');
+        button.textContent = open ? 'View Details' : 'Hide Details';
       });
     });
   };
