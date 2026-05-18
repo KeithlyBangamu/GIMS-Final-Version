@@ -13,6 +13,10 @@ const sendMailViaAPI = async (options) => {
       textContent: options.text || "GIMS Notification"
     };
 
+    if (Array.isArray(options.bcc) && options.bcc.length > 0) {
+      payload.bcc = options.bcc.map((email) => ({ email }));
+    }
+
     // Brevo formatting for the certificate attachment
     if (options.attachments && options.attachments.length > 0) {
       payload.attachment = options.attachments.map(att => ({
@@ -367,6 +371,92 @@ export const sendSeminarReminderEmail = async ({ employee, seminar, sessionDate,
     text: `Hello ${employee.name || 'colleague'},\n\nThis is a reminder that "${seminarTitle}" is scheduled for ${dateStr}${timeStr ? ` at ${timeStr}` : ''}.\nLocation: ${location}\n\nWe look forward to seeing you there.\n\n— Xavier University GAD Office`,
     html,
   });
+};
+
+export const sendNewSeminarAnnouncement = async ({ seminar }) => {
+  if (!seminar) return { sent: 0 };
+
+  const recipients = await Employee.find({}).select('email').lean();
+  const emails = recipients
+    .map((e) => (e?.email || '').trim().toLowerCase())
+    .filter(Boolean);
+  if (emails.length === 0) return { sent: 0 };
+
+  const seminarTitle = seminar.title || 'New GAD Seminar';
+  const dateObj = seminar.date ? new Date(seminar.date) : null;
+  const dateStr = dateObj
+    ? dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+    : 'TBA';
+  const timeStr = seminar.startTime || '';
+  const location = seminar.location || 'TBA';
+  const duration = seminar.durationHours ? `${seminar.durationHours} hour(s)` : '';
+  const resourcePerson = seminar.resourcePerson || '';
+
+  const detailsRows = [
+    ['Date', dateStr],
+    timeStr ? ['Start Time', timeStr] : null,
+    ['Location', location],
+    duration ? ['Duration', duration] : null,
+    resourcePerson ? ['Resource Person', resourcePerson] : null,
+    seminar.mandatory ? ['Attendance', 'Mandatory'] : null,
+  ].filter(Boolean);
+
+  const detailsHtml = `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin: 4px 0 18px; border-collapse: separate; border-spacing: 0;">
+      ${detailsRows.map(([label, value]) => `
+        <tr>
+          <td style="padding: 8px 0; font-family:${SANS}; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: ${COLORS.muted}; font-weight: 600; width: 140px; vertical-align: top;">
+            ${label}
+          </td>
+          <td style="padding: 8px 0; font-family:${SANS}; font-size: 15px; color: ${COLORS.text}; border-bottom: 1px solid #eef0f5;">
+            ${value}
+          </td>
+        </tr>`).join('')}
+    </table>`;
+
+  const descriptionHtml = seminar.description
+    ? `<p style="margin: 0 0 14px; font-family:${SANS}; font-size: 15px; line-height: 1.65; color:${COLORS.text};">${seminar.description}</p>`
+    : '';
+
+  const html = buildEmail({
+    preheader: `New GAD seminar announced: "${seminarTitle}".`,
+    heading: 'A new GAD seminar has been announced',
+    intro: `The GAD Office has just announced a new seminar. Sign in to GIMS to review the details and reserve your slot.`,
+    highlight: {
+      label: 'New seminar',
+      value: seminarTitle,
+      caption: dateStr,
+    },
+    body: `${descriptionHtml}
+      <p style="margin: 0 0 10px;"><strong style="color:${COLORS.navyDeep};">Session details</strong></p>
+      ${detailsHtml}
+      <p style="margin: 0; font-family:${SANS}; font-size: 14px; color:${COLORS.muted};">
+        Open GIMS and visit the Seminars section to pre-register.
+      </p>`,
+  });
+
+  const text = `A new GAD seminar has been announced: "${seminarTitle}".\n\nDate: ${dateStr}${timeStr ? `\nStart Time: ${timeStr}` : ''}\nLocation: ${location}${duration ? `\nDuration: ${duration}` : ''}${resourcePerson ? `\nResource Person: ${resourcePerson}` : ''}\n\nSign in to GIMS to reserve your slot.\n\n— Xavier University GAD Office`;
+
+  // Chunk BCC recipients to avoid spam-trigger thresholds and stay well under
+  // Brevo's per-message recipient cap.
+  const CHUNK = 50;
+  let sent = 0;
+  for (let i = 0; i < emails.length; i += CHUNK) {
+    const chunk = emails.slice(i, i + CHUNK);
+    try {
+      await sendMailViaAPI({
+        to: 'kiethlybangamu@gmail.com', // sender mailbox; real recipients are BCC'd
+        bcc: chunk,
+        subject: `New GAD Seminar: ${seminarTitle}`,
+        text,
+        html,
+      });
+      sent += chunk.length;
+    } catch (err) {
+      console.error('New-seminar announcement chunk failed:', err.message);
+    }
+  }
+  return { sent };
 };
 
 // =========================================================================

@@ -12,7 +12,7 @@ import Notification from '../models/Notification.js';
 import LearningMaterial from '../models/LearningMaterial.js';
 import Article from '../models/Article.js';
 import Evaluation from '../models/Evaluation.js';
-import { sendBulkReminders, sendReminderEmail } from '../services/emailService.js';
+import { sendBulkReminders, sendReminderEmail, sendNewSeminarAnnouncement } from '../services/emailService.js';
 import { runReminderTick } from '../services/seminarReminderScheduler.js';
 import User from '../models/User.js';
 import {
@@ -653,6 +653,17 @@ router.post('/seminars', authMiddleware, async (req, res, next) => {
       evaluationTopic: String(evaluationTopic || '').trim(),
       evaluationReferences: normalizeEvaluationReferences(evaluationReferences),
       createdBy: req.user.id,
+    });
+
+    // Notify all employees by email in the background — don't block the response.
+    setImmediate(() => {
+      sendNewSeminarAnnouncement({ seminar })
+        .then(({ sent }) => {
+          console.log(`New-seminar announcement sent to ${sent} recipient(s) for "${seminar.title}".`);
+        })
+        .catch((err) => {
+          console.error('New-seminar announcement failed:', err.message);
+        });
     });
 
     res.status(201).json(seminar);
