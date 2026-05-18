@@ -1071,22 +1071,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btn.dataset.busy === '1') return;
         btn.dataset.busy = '1';
         btn.disabled = true;
-        const originalLabel = btn.textContent;
-        btn.textContent = 'Preparing… (5s)';
-        let remaining = 5;
-        const countdown = setInterval(() => {
-          remaining -= 1;
-          if (remaining > 0) btn.textContent = `Preparing… (${remaining}s)`;
-          else {
-            btn.textContent = 'Generating certificate…';
-            clearInterval(countdown);
-          }
-        }, 1000);
         try {
           await downloadCertificate(registrationId);
         } finally {
-          clearInterval(countdown);
-          btn.textContent = originalLabel;
           btn.disabled = false;
           delete btn.dataset.busy;
         }
@@ -1656,7 +1643,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const downloadCertificate = async (registrationId) => {
     if (!registrationId) return;
-    if (el.attendedCertStatus) el.attendedCertStatus.textContent = 'Preparing download…';
+    const status = el.attendedCertStatus;
+    const start = Date.now();
+    let tick = null;
+    if (status) {
+      status.textContent = 'Preparing certificate… 0s';
+      tick = setInterval(() => {
+        const secs = Math.floor((Date.now() - start) / 1000);
+        status.textContent = `Preparing certificate… ${secs}s (this usually takes ~5–10s)`;
+      }, 1000);
+    }
     try {
       const res = await authedFetch(`/api/employee/certificates/${registrationId}/download`);
       if (!res.ok) {
@@ -1676,10 +1672,13 @@ document.addEventListener('DOMContentLoaded', () => {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      if (el.attendedCertStatus) el.attendedCertStatus.textContent = '';
+      if (status) status.textContent = 'Certificate downloaded.';
+      setTimeout(() => { if (status) status.textContent = ''; }, 3000);
     } catch (err) {
       console.error('[employee-dashboard] certificate download failed', err);
-      if (el.attendedCertStatus) el.attendedCertStatus.textContent = err.message || 'Download failed.';
+      if (status) status.textContent = err.message || 'Download failed.';
+    } finally {
+      if (tick) clearInterval(tick);
     }
   };
 

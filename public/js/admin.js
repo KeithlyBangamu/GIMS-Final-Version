@@ -1290,17 +1290,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (button.dataset.busy === '1') return;
         button.dataset.busy = '1';
         button.disabled = true;
-        const originalLabel = button.textContent;
-        button.textContent = 'Preparing… (5s)';
-        let remaining = 5;
-        const countdown = setInterval(() => {
-          remaining -= 1;
-          if (remaining > 0) button.textContent = `Preparing… (${remaining}s)`;
-          else {
-            button.textContent = 'Generating…';
-            clearInterval(countdown);
-          }
-        }, 1000);
+        const start = Date.now();
+        let tick = null;
+        if (profileModalStatusEl) {
+          profileModalStatusEl.textContent = 'Preparing certificate… 0s';
+          tick = setInterval(() => {
+            const secs = Math.floor((Date.now() - start) / 1000);
+            profileModalStatusEl.textContent = `Preparing certificate… ${secs}s (this usually takes ~5–10s)`;
+          }, 1000);
+        }
         try {
           const res = await authedFetch(`/api/admin/employees/${employeeId}/certificates/${registrationId}/download`);
           if (!res.ok) {
@@ -1320,12 +1318,17 @@ document.addEventListener('DOMContentLoaded', () => {
           a.click();
           a.remove();
           setTimeout(() => URL.revokeObjectURL(url), 1000);
+          if (profileModalStatusEl) {
+            profileModalStatusEl.textContent = 'Certificate downloaded.';
+            setTimeout(() => {
+              if (profileModalStatusEl) profileModalStatusEl.textContent = '';
+            }, 3000);
+          }
         } catch (err) {
           console.error('[admin] certificate download failed', err);
           if (profileModalStatusEl) profileModalStatusEl.textContent = err.message || 'Certificate download failed.';
         } finally {
-          clearInterval(countdown);
-          button.textContent = originalLabel;
+          if (tick) clearInterval(tick);
           button.disabled = false;
           delete button.dataset.busy;
         }
