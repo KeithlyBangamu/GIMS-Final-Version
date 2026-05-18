@@ -58,6 +58,13 @@ const SeminarSchema = new mongoose.Schema(
       enum: ['all', 'pick-one'],
       default: 'all',
     },
+    evaluationTopic: { type: String, trim: true, default: '' },
+    evaluationReferences: [
+      {
+        label: { type: String, trim: true, default: '' },
+        shortName: { type: String, trim: true, default: '' },
+      },
+    ],
     schoolYear: { type: String, trim: true, default: null, index: true },
     isDeleted: { type: Boolean, default: false, index: true },
     deletedAt: { type: Date, default: null },

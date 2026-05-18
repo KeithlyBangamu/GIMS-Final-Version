@@ -1,70 +1,73 @@
 # GIMS – GAD Integrated Management System
 
-GIMS is a web-based information system for the **Xavier University Gender and Development (GAD) Office**. It manages seminars, employee participation, evaluations, certificates, and compliance reporting.
+GIMS is a web app for the Xavier University Gender and Development (GAD) Office. It handles seminars, employee registrations, attendance, evaluations, certificate issuance, and the yearly compliance reporting the office submits.
 
-Built with:
-- **Node.js**, **Express.js**, **MongoDB** (Mongoose)
-- **Gmail (Nodemailer)** for verification PINs and reminders
-- **Puppeteer** for certificate PDF generation
-- Role-based access (Admin and Employee dashboards)
+Stack: Node.js / Express, MongoDB (Mongoose), Nodemailer over Gmail, Puppeteer for PDF certificates. JWT-based auth with separate admin and employee dashboards.
 
-## Core Features
+Authors: Group 1 / Group 6.
 
-### Admin Dashboard
-- Manage seminars (sessions, capacity, mandatory flag, certificate release mode)
-- Track registrations, attendance, and finalize per-session attendance
-- Issue and download seminar certificates
-- Manage employee accounts (create, deactivate, reset)
-- Post seminar **Articles / Updates**
-- Upload **Learning Materials** (PDF / PPT / PPTX)
-- Send bulk reminder emails for non-compliant employees
-- Department gender-mix reports (birth-sex based)
+## What it does
 
-### Employee Portal
-- Sign up via Gmail PIN verification
-- View own compliance status and required seminars
-- Register for upcoming seminars
-- Submit seminar evaluations
+Admin side:
+- Create seminars with one or more sessions, set capacity, mark as mandatory, choose certificate release mode
+- Approve registrations, mark sessions as held, take per-session attendance, finalize attendance
+- Issue and download certificates (per-seminar or per-participant)
+- Soft-delete seminars and restore them from the trash (or permanently delete)
+- Manage employee accounts — activate, deactivate, reset password
+- Post Articles / Updates (with cover image) for the employee feed
+- Upload Learning Materials (PDF / PPT / PPTX, max 50 MB) globally or attached to a seminar
+- Send bulk reminder emails to non-compliant employees
+- Reports: CHED-format PDF, employees CSV, per-seminar report, evaluation summary
+- End-of-school-year reset: archive all current seminars/registrations into a school-year archive, then start fresh. Old archives stay browsable and exportable to Excel masterlist.
+- Maintenance log of admin actions (resets, restores, etc.)
+
+Employee side:
+- Sign up with an `@xu.edu.ph` Gmail using a 6-digit PIN
+- Forgot-password flow (PIN-based)
+- View compliance status and the seminars still required
+- Register for upcoming seminars, see registration history
+- Submit post-seminar evaluations
 - Download earned certificates
-- Read latest seminar Articles / Updates
+- Read Articles / Updates and access Learning Materials
 
-## Project Structure
+Background: a scheduler sends reminder emails for upcoming seminars without anyone needing to click a button.
+
+## Project layout
 
 ```
 src/
-  server.js                 Express bootstrap
-  config/db.js              MongoDB connection (database: gims)
-  models/
-    Article.js              Seminar articles / updates
-    Employee.js             Employee profile + role
-    Evaluation.js           Post-seminar evaluation responses
-    LearningMaterial.js     Uploaded materials metadata
-    Notification.js         In-app notifications
-    PasswordReset.js        One-time password-reset PINs
-    PinVerification.js      Sign-up PIN verification
-    Registration.js         Seminar registration + per-session attendance
-    Seminar.js              Seminar metadata
-    User.js                 Login accounts (admin / employee)
+  server.js                       Express bootstrap
+  config/
+    db.js                         Mongo connection
+    bootstrapAccounts.js          Initial admin bootstrap on boot
+    passwordPolicy.js             Password rules (length, complexity)
+  models/                         Mongoose schemas
+    Article, Employee, Evaluation, LearningMaterial,
+    Notification, PasswordReset, PinVerification,
+    Registration, Seminar, User,
+    SeminarArchive, RegistrationArchive,   ← yearly archives
+    MaintenanceLog
   routes/
-    admin.js                Admin API
-    auth.js                 Sign-up, login, PIN, password reset
-    employee.js             Employee API
+    auth.js                       sign-up / login / PIN / forgot-password
+    admin.js                      admin APIs
+    employee.js                   employee APIs
+    maintenance.js                archives, school-year reset, masterlist
   services/
-    certificateService.js   Certificate rendering / issuance (Puppeteer)
-    emailService.js         Gmail-based PIN + reminder emails
+    certificateService.js         Puppeteer cert rendering
+    emailService.js               Gmail PINs + reminders
+    reportService.js              CHED PDF + Excel reports (exceljs)
+    schoolYearService.js          School year calc / reset logic
+    seminarReminderScheduler.js   Auto reminder job
   scripts/
-    seedSamples.js          Optional: seed sample admin/employee/seminar data
+    seedSamples.js                Optional sample data
 public/
-  admin.html, employee.html, signup.html, login.html, index.html
-  css/                      Stylesheets
-  js/                       Frontend scripts
-  images/                   Static images
-  uploads/                  Runtime user uploads (gitignored)
+  *.html, css/, js/, images/
+  uploads/                        runtime uploads (gitignored)
 ```
 
-## Environment Configuration
+## Environment
 
-Copy `.env.example` to `.env` and fill in real values:
+Copy `.env.example` to `.env` and fill in the real values. Sample:
 
 ```env
 PORT=4000
@@ -72,80 +75,55 @@ MONGO_URI=mongodb://127.0.0.1:27017/gims
 JWT_SECRET=change-this-secret
 USE_IN_MEMORY_DB=false
 
-# Gmail (use an App Password)
-GMAIL_USER=your-xu-gad-email@example.com
-GMAIL_APP_PASSWORD=your-app-password
+GMAIL_USER=your-gad-email@example.com
+GMAIL_APP_PASSWORD=your-gmail-app-password
 
-# Branding
 ORG_NAME=Xavier University – Ateneo de Cagayan
 SYSTEM_NAME=GIMS
 ```
 
-> **Never commit `.env` or real credentials.** `.env` is gitignored.
-> Set `USE_IN_MEMORY_DB=true` to spin up an ephemeral MongoDB for local testing without installing MongoDB.
+A couple of things that have bitten us:
+- `GMAIL_APP_PASSWORD` is a Google App Password, not your Gmail password. PINs/reminders silently fail to send if this is wrong.
+- `USE_IN_MEMORY_DB=true` is convenient for local testing but the data is wiped every restart — don't leave it on for demos.
+- `.env` and `public/uploads/*` are gitignored. Keep them that way.
 
-## Installation & Running
+## Running it
 
-### Local (Node + MongoDB)
-
+Local:
 ```bash
 npm install
 npm run dev
 ```
+App: `http://localhost:4000`.
 
-The app runs at `http://localhost:4000`.
-
-### Docker (recommended)
-
+Docker (brings up Mongo + app together):
 ```bash
 docker compose up --build
 ```
 
-This brings up two containers:
-- `gims_mongo` (MongoDB 7, database name `gims`)
-- `gims_app` (the Node app, port 4000)
+## First-time setup
 
-Open `http://localhost:4000`.
+1. Get an admin account. Easiest: `npm run seed` (runs `src/scripts/seedSamples.js` — creates a sample admin, employee, and seminar). Or hit the bootstrap endpoint once:
 
-## First-Time Setup
+   ```
+   POST /api/admin/seed-admin
+   { "name": "...", "email": "...", "password": "...", "birthSex": "Female" }
+   ```
 
-### 1. Create an admin account
+2. Log in at `/admin.html`, create seminars and upload materials.
 
-Either:
-- Run the optional seed script: `node src/scripts/seedSamples.js`
-- Or use the **Create Admin Account** form inside the Admin Dashboard, or call the bootstrap endpoint:
+3. Employees sign up at `/signup.html` with their `@xu.edu.ph` Gmail.
 
-```bash
-POST http://localhost:4000/api/admin/seed-admin
-Content-Type: application/json
+## Yearly reset
 
-{
-  "name": "GIMS Admin",
-  "email": "gad.admin@xu.edu.ph",
-  "password": "StrongPassword123",
-  "birthSex": "Female"
-}
-```
+At the end of a school year, admin can run the reset from the Maintenance page. Current seminars + registrations get moved into a `SeminarArchive` / `RegistrationArchive` keyed by school year, and the live collections start empty for the new year. Archives stay readable and can be exported to an Excel masterlist. Don't run this casually — it's irreversible without restoring the archive.
 
-Then log in from `/admin.html`.
+## Security notes
 
-### 2. Create seminars and learning materials
-
-Use the Admin Dashboard:
-- **Manage Seminars** → create sessions, set capacity, mandatory flag, certificate release mode.
-- **Learning Materials** → upload PDFs / PPTs (max 50 MB each).
-
-### 3. Employee onboarding
-
-Employees sign up at `/signup.html` using their `@xu.edu.ph` Gmail. A 6-digit PIN is emailed for verification, after which they set a password and log in at `/login.html`.
-
-## Security Notes
-
-- `.env` and `public/uploads/*` are gitignored — never commit secrets or user uploads.
-- Passwords are hashed with **bcryptjs**; only password hashes are stored.
-- Admin / employee routes are gated by JWT (`JWT_SECRET`). Rotate the secret in production.
-- Gmail uses an **App Password**, not the account password. Revoke if leaked.
-- File uploads are restricted by extension and size (PDF/PPT/PPTX only for materials, ≤50 MB).
+- Passwords are bcrypt-hashed (`bcryptjs`); only the hash is stored.
+- JWT secret should be rotated in production. Don't ship the default.
+- Uploads are restricted by extension and size (PDF / PPT / PPTX, ≤50 MB).
+- Don't commit `.env`, `public/uploads/*`, or any Gmail App Password.
 
 ## License
 

@@ -256,11 +256,17 @@ router.get('/dashboard', async (req, res, next) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const seminars = await Seminar.find({ date: { $gte: today }, isDeleted: { $ne: true } })
+    const seminars = await Seminar.find({ date: { $gte: today }, isDeleted: { $ne: true }, isHeld: { $ne: true } })
       .sort({ date: 1, startTime: 1 })
       .populate('createdBy', 'name');
 
-    const upcomingSeminars = seminars.map((s) => {
+    const upcomingSeminars = seminars
+      .filter((s) => {
+        const sessionsArr = Array.isArray(s.sessions) ? s.sessions : [];
+        if (sessionsArr.length === 0) return true;
+        return !sessionsArr.every((sess) => sess.isHeld);
+      })
+      .map((s) => {
       const remaining = Math.max(0, (s.capacity || 0) - (Array.isArray(s.registeredEmployees) ? s.registeredEmployees.length : 0));
       return {
         id: s._id.toString(),
@@ -566,6 +572,12 @@ router.post('/seminars/:id/register', async (req, res, next) => {
       return res.status(404).json({ message: 'Seminar not found' });
     }
 
+    const sessionsArr = Array.isArray(seminar.sessions) ? seminar.sessions : [];
+    const allSessionsHeld = sessionsArr.length > 0 && sessionsArr.every((s) => s.isHeld);
+    if (seminar.isHeld || allSessionsHeld) {
+      return res.status(400).json({ message: 'Pre-registration is closed — this seminar has already been held.' });
+    }
+
     const employeeId = req.user.id;
 
     // Check if already registered in any state
@@ -590,6 +602,9 @@ router.post('/seminars/:id/register', async (req, res, next) => {
       const validSession = seminar.sessions.find((s) => String(s._id) === String(sessionId));
       if (!validSession) {
         return res.status(400).json({ message: 'The selected session does not exist for this seminar.' });
+      }
+      if (validSession.isHeld) {
+        return res.status(400).json({ message: 'The selected session has already been held.' });
       }
       chosenSessionId = validSession._id;
     }
@@ -629,6 +644,20 @@ router.get('/notifications', async (req, res, next) => {
   }
 });
 
+// Mark all notifications as read (must be registered BEFORE /:id/read so Express
+// never tries to interpret "read-all" as an :id parameter)
+router.put('/notifications/read-all', async (req, res, next) => {
+  try {
+    const result = await Notification.updateMany(
+      { employeeID: req.user.id, read: false },
+      { $set: { read: true } }
+    );
+    res.json({ message: 'All notifications marked as read', modified: result.modifiedCount || 0 });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Mark a notification as read
 router.put('/notifications/:id/read', async (req, res, next) => {
   try {
@@ -639,19 +668,6 @@ router.put('/notifications/:id/read', async (req, res, next) => {
     );
     if (!notification) return res.status(404).json({ message: 'Notification not found' });
     res.json(notification);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// Mark all notifications as read
-router.put('/notifications/read-all', async (req, res, next) => {
-  try {
-    await Notification.updateMany(
-      { employeeID: req.user.id, read: false },
-      { $set: { read: true } }
-    );
-    res.json({ message: 'All notifications marked as read' });
   } catch (err) {
     next(err);
   }
@@ -673,7 +689,7 @@ router.get('/registrations/:registrationId/evaluation', async (req, res, next) =
     const registration = await Registration.findOne({
       _id: req.params.registrationId,
       employeeID: req.user.id,
-    }).populate('seminarID', 'title date startTime');
+    }).populate('seminarID', 'title description date startTime evaluationTopic evaluationReferences');
 
     if (!registration) return res.status(404).json({ message: 'Registration not found' });
 
@@ -689,8 +705,16 @@ router.get('/registrations/:registrationId/evaluation', async (req, res, next) =
         ? {
             id: registration.seminarID._id.toString(),
             title: registration.seminarID.title,
+            description: registration.seminarID.description || '',
             date: registration.seminarID.date,
             startTime: registration.seminarID.startTime,
+            evaluationTopic: registration.seminarID.evaluationTopic || '',
+            evaluationReferences: Array.isArray(registration.seminarID.evaluationReferences)
+              ? registration.seminarID.evaluationReferences.map((r) => ({
+                  label: r.label || '',
+                  shortName: r.shortName || '',
+                }))
+              : [],
           }
         : null,
       evaluation: existing || null,
@@ -717,18 +741,55 @@ router.post('/registrations/:registrationId/evaluation', async (req, res, next) 
       return res.status(400).json({ message: 'You have already submitted an evaluation for this seminar.' });
     }
 
-    const { rating, feedback, wouldRecommend } = req.body;
-    if (!rating || Number(rating) < 1 || Number(rating) > 5) {
-      return res.status(400).json({ message: 'Rating must be between 1 and 5.' });
+    const { ratings = {}, responses = {}, consent, acknowledgement } = req.body;
+
+    const inRange = (n) => Number.isFinite(n) && n >= 1 && n <= 5;
+    const overall = Number(ratings.overall);
+    if (!inRange(overall)) {
+      return res.status(400).json({ message: 'Overall rating must be between 1 and 5.' });
     }
+
+    const optionalRating = (v) => {
+      const n = Number(v);
+      return inRange(n) ? n : undefined;
+    };
+
+    const lessons = Array.isArray(responses.lessons)
+      ? responses.lessons
+          .map((l) => ({
+            referenceLabel: String(l?.referenceLabel || '').trim(),
+            referenceShortName: String(l?.referenceShortName || '').trim(),
+            answer: String(l?.answer || '').trim(),
+          }))
+          .filter((l) => l.referenceLabel || l.referenceShortName || l.answer)
+      : [];
 
     const evaluation = await Evaluation.create({
       registrationID: registration._id,
       seminarID: registration.seminarID,
       employeeID: req.user.id,
-      rating: Number(rating),
-      feedback: String(feedback || '').trim(),
-      wouldRecommend: wouldRecommend !== false && wouldRecommend !== 'false',
+      ratings: {
+        overall,
+        relevance: optionalRating(ratings.relevance),
+        facilitator: optionalRating(ratings.facilitator),
+        organization: optionalRating(ratings.organization),
+        interaction: optionalRating(ratings.interaction),
+        food: optionalRating(ratings.food),
+        venue: optionalRating(ratings.venue),
+        understanding: optionalRating(ratings.understanding),
+        applyLikelihood: optionalRating(ratings.applyLikelihood),
+      },
+      responses: {
+        relevanceContext: String(responses.relevanceContext || '').trim(),
+        lessons,
+        stop: String(responses.stop || '').trim(),
+        start: String(responses.start || '').trim(),
+        continueDoing: String(responses.continueDoing || '').trim(),
+        improvements: String(responses.improvements || '').trim(),
+      },
+      consent: consent === true || consent === 'true',
+      acknowledgement: acknowledgement === true || acknowledgement === 'true',
+      rating: overall,
       submittedAt: new Date(),
     });
 

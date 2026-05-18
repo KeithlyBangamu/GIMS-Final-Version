@@ -870,6 +870,20 @@
                     Description
                     <textarea name="description" rows="3" required></textarea>
                   </label>
+                  <div style="grid-column: 1 / -1; border:1px solid var(--border); border-radius:0.5rem; padding:0.8rem;">
+                    <div style="font-weight:600; margin-bottom:0.35rem;">Evaluation Customization <span class="muted small" style="font-weight:400;">(optional)</span></div>
+                    <p class="muted small" style="margin:0 0 0.7rem;">Sets topic-specific wording in the post-seminar evaluation form. Leave blank for a generic evaluation.</p>
+                    <label style="display:block;">
+                      Evaluation Topic
+                      <input type="text" name="evaluationTopic" placeholder="e.g. gender-based sexual harassment" />
+                    </label>
+                    <div style="margin-top:0.7rem;">
+                      <div style="font-weight:600; margin-bottom:0.35rem;">Legal / Reference Materials</div>
+                      <p class="muted small" style="margin:0 0 0.5rem;">Each entry generates a "most important lesson learned" question.</p>
+                      <div id="create-eval-refs-list" style="display:flex; flex-direction:column; gap:0.5rem;"></div>
+                      <button type="button" class="btn secondary" id="create-eval-refs-add" style="margin-top:0.5rem;">+ Add Reference</button>
+                    </div>
+                  </div>
                   <div style="display:flex; align-items:flex-end; gap: 0.7rem;">
                     <button class="btn" type="submit">Create Seminar</button>
                     <button class="btn secondary" id="admin-create-seminar-clear-btn" type="button">Clear</button>
@@ -1048,6 +1062,20 @@
               Description
               <textarea name="description" rows="3" required></textarea>
             </label>
+            <div style="grid-column: 1 / -1; border:1px solid var(--border); border-radius:0.5rem; padding:0.8rem;">
+              <div style="font-weight:600; margin-bottom:0.35rem;">Evaluation Customization <span class="muted small" style="font-weight:400;">(optional)</span></div>
+              <p class="muted small" style="margin:0 0 0.7rem;">Sets topic-specific wording in the post-seminar evaluation form. Leave blank for a generic evaluation.</p>
+              <label style="display:block;">
+                Evaluation Topic
+                <input type="text" name="evaluationTopic" placeholder="e.g. gender-based sexual harassment" />
+              </label>
+              <div style="margin-top:0.7rem;">
+                <div style="font-weight:600; margin-bottom:0.35rem;">Legal / Reference Materials</div>
+                <p class="muted small" style="margin:0 0 0.5rem;">Each entry generates a "most important lesson learned" question.</p>
+                <div id="edit-eval-refs-list" style="display:flex; flex-direction:column; gap:0.5rem;"></div>
+                <button type="button" class="btn secondary" id="edit-eval-refs-add" style="margin-top:0.5rem;">+ Add Reference</button>
+              </div>
+            </div>
             <div style="display:flex; align-items:flex-end; gap: 0.7rem;">
               <button class="btn" type="submit">Save Changes</button>
               <button class="btn secondary" id="admin-seminar-edit-cancel" type="button">Cancel</button>
