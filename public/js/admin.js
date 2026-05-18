@@ -104,6 +104,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const seminarParticipantsListEl = document.getElementById('admin-seminar-participants-list');
   const seminarParticipantsStatusEl = document.getElementById('admin-seminar-participants-status');
   const seminarHeldBtn = document.getElementById('admin-seminar-held-btn');
+  const seminarEvalsModalEl = document.getElementById('admin-seminar-evaluations-modal');
+  const seminarEvalsCloseBtn = document.getElementById('admin-seminar-evaluations-close');
+  const seminarEvalsMetaEl = document.getElementById('admin-seminar-evaluations-meta');
+  const seminarEvalsSummaryEl = document.getElementById('admin-seminar-evaluations-summary');
+  const seminarEvalsListEl = document.getElementById('admin-seminar-evaluations-list');
+  const seminarEvalsStatusEl = document.getElementById('admin-seminar-evaluations-status');
   const markAttendanceBtn = document.getElementById('admin-mark-attendance-btn');
   const sendCertificatesBtn = document.getElementById('admin-send-certificates-btn');
   const attendanceSelectAllEl = document.getElementById('admin-attendance-select-all');
@@ -1532,6 +1538,172 @@ document.addEventListener('DOMContentLoaded', () => {
     if (seminarReportContentEl) seminarReportContentEl.innerHTML = '<p class="muted">Loading report…</p>';
   };
 
+  const closeEvaluationsModal = () => {
+    if (seminarEvalsModalEl) seminarEvalsModalEl.style.display = 'none';
+  };
+  if (seminarEvalsCloseBtn) seminarEvalsCloseBtn.addEventListener('click', closeEvaluationsModal);
+  if (seminarEvalsModalEl) {
+    seminarEvalsModalEl.addEventListener('click', (e) => {
+      if (e.target === seminarEvalsModalEl) closeEvaluationsModal();
+    });
+  }
+
+  const renderRatingChips = (ratings) => {
+    if (!ratings || typeof ratings !== 'object') return '';
+    const labels = {
+      overall: 'Overall',
+      relevance: 'Relevance',
+      facilitator: 'Facilitator',
+      organization: 'Organization',
+      interaction: 'Interaction',
+      food: 'Food',
+      venue: 'Venue',
+      understanding: 'Understanding',
+      applyLikelihood: 'Will Apply',
+    };
+    const chips = Object.entries(labels)
+      .filter(([key]) => ratings[key] != null)
+      .map(([key, label]) => `
+        <span style="display:inline-flex; align-items:center; gap:0.35rem; background:#eef3ff; color:#1f3c77; border:1px solid #c9d8f3; border-radius:999px; padding:0.18rem 0.6rem; font-size:0.78rem; font-weight:600;">
+          ${escapeHtml(label)}: ${Number(ratings[key]).toFixed(1)}/5
+        </span>`)
+      .join(' ');
+    return chips
+      ? `<div style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-top:0.4rem;">${chips}</div>`
+      : '';
+  };
+
+  const renderEvalText = (label, value) => {
+    if (!value || !String(value).trim()) return '';
+    return `
+      <div style="margin-top:0.55rem;">
+        <div class="muted small" style="font-size:0.75rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">${escapeHtml(label)}</div>
+        <div style="margin-top:0.18rem; font-size:0.92rem; line-height:1.5; white-space:pre-wrap;">${escapeHtml(value)}</div>
+      </div>`;
+  };
+
+  const computeEvalSummary = (evaluations) => {
+    if (!Array.isArray(evaluations) || evaluations.length === 0) return null;
+    const keys = ['overall', 'relevance', 'facilitator', 'organization', 'interaction', 'food', 'venue', 'understanding', 'applyLikelihood'];
+    const labels = {
+      overall: 'Overall',
+      relevance: 'Relevance',
+      facilitator: 'Facilitator',
+      organization: 'Organization',
+      interaction: 'Interaction',
+      food: 'Food',
+      venue: 'Venue',
+      understanding: 'Understanding',
+      applyLikelihood: 'Will Apply',
+    };
+    const sums = {};
+    const counts = {};
+    keys.forEach((k) => { sums[k] = 0; counts[k] = 0; });
+    evaluations.forEach((ev) => {
+      const r = ev?.ratings || {};
+      keys.forEach((k) => {
+        if (r[k] != null && Number.isFinite(Number(r[k]))) {
+          sums[k] += Number(r[k]);
+          counts[k] += 1;
+        }
+      });
+    });
+    return keys
+      .filter((k) => counts[k] > 0)
+      .map((k) => ({ key: k, label: labels[k], avg: sums[k] / counts[k], count: counts[k] }));
+  };
+
+  const renderEvalSummary = (evaluations) => {
+    const stats = computeEvalSummary(evaluations);
+    if (!stats || stats.length === 0) {
+      if (seminarEvalsSummaryEl) seminarEvalsSummaryEl.innerHTML = '';
+      return;
+    }
+    const cards = stats
+      .map((s) => `
+        <div style="border:1px solid var(--border); border-radius:8px; padding:0.55rem 0.75rem; background:#fff; min-width:120px;">
+          <div class="muted small" style="font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">${escapeHtml(s.label)}</div>
+          <div style="font-size:1.25rem; font-weight:700; color:var(--xu-blue); margin-top:0.15rem;">${s.avg.toFixed(2)}<span style="font-size:0.85rem; color:#64748b; font-weight:500;">/5</span></div>
+          <div class="muted small" style="font-size:0.72rem;">${s.count} response${s.count === 1 ? '' : 's'}</div>
+        </div>`)
+      .join('');
+    if (seminarEvalsSummaryEl) {
+      seminarEvalsSummaryEl.innerHTML = `
+        <div class="muted small" style="font-weight:700; color:#0f172a; margin-bottom:0.4rem;">Rating averages</div>
+        <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">${cards}</div>`;
+    }
+  };
+
+  const openEvaluationsModal = async (seminar) => {
+    if (!seminarEvalsModalEl) return;
+    if (seminarEvalsMetaEl) {
+      seminarEvalsMetaEl.textContent = `${seminar.title || 'Seminar'} • ${formatDate(seminar.date)}`;
+    }
+    if (seminarEvalsSummaryEl) seminarEvalsSummaryEl.innerHTML = '';
+    if (seminarEvalsListEl) seminarEvalsListEl.innerHTML = '<p class="muted">Loading evaluations…</p>';
+    if (seminarEvalsStatusEl) seminarEvalsStatusEl.textContent = '';
+    seminarEvalsModalEl.style.display = 'flex';
+
+    try {
+      const res = await authedFetch(`/api/admin/seminars/${seminar._id}/evaluations`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || 'Failed to load evaluations.');
+      const evaluations = Array.isArray(data) ? data : [];
+      if (evaluations.length === 0) {
+        if (seminarEvalsListEl) seminarEvalsListEl.innerHTML = '<p class="muted">No evaluations submitted yet for this seminar.</p>';
+        return;
+      }
+
+      renderEvalSummary(evaluations);
+
+      if (seminarEvalsListEl) {
+        seminarEvalsListEl.innerHTML = evaluations
+          .map((ev) => {
+            const employee = ev?.employeeID || {};
+            const employeeName = ev?.consent === false
+              ? 'Anonymous (no consent given)'
+              : (employee?.name || 'Unknown employee');
+            const department = ev?.consent === false ? '' : (employee?.department || '');
+            const submitted = ev?.submittedAt ? new Date(ev.submittedAt).toLocaleString() : '';
+            const lessons = Array.isArray(ev?.responses?.lessons) ? ev.responses.lessons : [];
+            const lessonsBlock = lessons.length > 0
+              ? `<div style="margin-top:0.55rem;">
+                  <div class="muted small" style="font-size:0.75rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Lessons</div>
+                  ${lessons.map((l) => `
+                    <div style="margin-top:0.25rem; font-size:0.9rem;">
+                      <span style="font-weight:600; color:var(--xu-blue);">${escapeHtml(l?.referenceLabel || l?.referenceShortName || 'Reference')}:</span>
+                      <span style="white-space:pre-wrap;">${escapeHtml(l?.answer || '')}</span>
+                    </div>`).join('')}
+                </div>`
+              : '';
+
+            return `
+              <article class="card" style="box-shadow:none; padding:0.85rem 1rem; margin-bottom:0.7rem;">
+                <div style="display:flex; justify-content:space-between; gap:0.6rem; flex-wrap:wrap; align-items:flex-start;">
+                  <div>
+                    <div style="font-weight:700; color:#0f172a;">${escapeHtml(employeeName)}</div>
+                    ${department ? `<div class="muted small">${escapeHtml(department)}</div>` : ''}
+                  </div>
+                  <div class="muted small" style="text-align:right;">${escapeHtml(submitted)}</div>
+                </div>
+                ${renderRatingChips(ev?.ratings)}
+                ${renderEvalText('Relevance Context', ev?.responses?.relevanceContext)}
+                ${lessonsBlock}
+                ${renderEvalText('Stop Doing', ev?.responses?.stop)}
+                ${renderEvalText('Start Doing', ev?.responses?.start)}
+                ${renderEvalText('Continue Doing', ev?.responses?.continueDoing)}
+                ${renderEvalText('Improvements', ev?.responses?.improvements)}
+              </article>`;
+          })
+          .join('');
+      }
+    } catch (err) {
+      console.error('[admin] load evaluations failed', err);
+      if (seminarEvalsListEl) seminarEvalsListEl.innerHTML = '';
+      if (seminarEvalsStatusEl) seminarEvalsStatusEl.textContent = err.message || 'Failed to load evaluations.';
+    }
+  };
+
   const buildEvalRefsRepeater = (mode) => {
     const listEl = document.getElementById(`${mode}-eval-refs-list`);
     const addBtn = document.getElementById(`${mode}-eval-refs-add`);
@@ -1848,6 +2020,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div style="${actionGroupStyle}">
               <button class="btn secondary" type="button" data-seminar-view="${seminar._id}" style="${wideButtonStyle}">View Participants</button>
               <button class="btn secondary" type="button" data-seminar-held="${seminar._id}" style="${wideButtonStyle}">${seminar.isHeld ? 'Unmark Held' : 'Mark as Held'}</button>
+              <button class="btn secondary" type="button" data-seminar-evals="${seminar._id}" style="${wideButtonStyle}">Evaluations</button>
               <button class="btn" type="button" data-seminar-edit="${seminar._id}" style="${shortButtonStyle}">Edit</button>
               <button class="btn secondary" type="button" data-seminar-delete="${seminar._id}" style="${shortButtonStyle}">Delete</button>
             </div>
@@ -1869,6 +2042,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const seminar = currentSeminars.find((item) => String(item._id) === String(button.getAttribute('data-seminar-edit')));
         if (!seminar) return;
         openSeminarEditModal(seminar);
+      });
+    });
+
+    seminarsCarouselEl.querySelectorAll('[data-seminar-evals]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const seminar = currentSeminars.find((item) => String(item._id) === String(button.getAttribute('data-seminar-evals')));
+        if (!seminar) return;
+        await openEvaluationsModal(seminar);
       });
     });
 
