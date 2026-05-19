@@ -1043,7 +1043,7 @@ router.post('/seminars/:id/held', authMiddleware, async (req, res, next) => {
     const desired = (req.body && (req.body.isHeld ?? req.body.held));
     const targetHeld = typeof desired === 'boolean' ? desired : true;
     if (targetHeld && !seminar.isHeld) {
-      // Guard: cannot mark held until the seminar's end time has passed.
+      // Guard: cannot mark held until the seminar's start time has passed.
       const sessions = Array.isArray(seminar.sessions) && seminar.sessions.length > 0
         ? seminar.sessions
         : [{ date: seminar.date, startTime: seminar.startTime, durationHours: seminar.durationHours }];
