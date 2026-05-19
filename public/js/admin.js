@@ -3475,9 +3475,32 @@ document.addEventListener('DOMContentLoaded', () => {
   setTopbarFromToken();
   setDeletedSeminarsModalVisibility(false);
   showNavModule('dashboard');
-  // ============== Add Past Seminar (Backfill) ==============
-  const pastSeminarForm = document.getElementById('maintenance-past-seminar-form');
-  const pastSeminarStatus = document.getElementById('maintenance-past-seminar-status');
+  // ============== Record Past Seminar ==============
+  const pastSeminarBtn = document.getElementById('admin-record-past-seminar-btn');
+  const pastSeminarModal = document.getElementById('admin-record-past-seminar-modal');
+  const pastSeminarCloseBtn = document.getElementById('admin-record-past-seminar-close');
+  const pastSeminarForm = document.getElementById('admin-record-past-seminar-form');
+  const pastSeminarStatus = document.getElementById('admin-record-past-seminar-status');
+
+  const closePastSeminarModal = () => {
+    if (pastSeminarModal) pastSeminarModal.style.display = 'none';
+    if (pastSeminarStatus) {
+      pastSeminarStatus.textContent = '';
+      pastSeminarStatus.style.color = '';
+    }
+  };
+
+  if (pastSeminarBtn && pastSeminarModal) {
+    pastSeminarBtn.addEventListener('click', () => {
+      if (pastSeminarStatus) {
+        pastSeminarStatus.textContent = '';
+        pastSeminarStatus.style.color = '';
+      }
+      pastSeminarModal.style.display = 'flex';
+    });
+  }
+  if (pastSeminarCloseBtn) pastSeminarCloseBtn.addEventListener('click', closePastSeminarModal);
+
   if (pastSeminarForm) {
     pastSeminarForm.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -3501,10 +3524,10 @@ document.addEventListener('DOMContentLoaded', () => {
           body: JSON.stringify(payload),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data?.message || 'Failed to create past seminar.');
+        if (!res.ok) throw new Error(data?.message || 'Failed to record past seminar.');
         if (pastSeminarStatus) {
           pastSeminarStatus.style.color = '#059669';
-          pastSeminarStatus.textContent = data.message || 'Past seminar created.';
+          pastSeminarStatus.textContent = data.message || 'Past seminar recorded.';
         }
         pastSeminarForm.reset();
         const startTimeField = pastSeminarForm.querySelector('[name="startTime"]');
@@ -3515,6 +3538,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (capacityField) capacityField.value = '999';
         // Refresh seminars carousel so the new one appears.
         if (typeof loadAll === 'function') loadAll().catch(() => {});
+        // Auto-close the modal after a moment so the admin sees the success message.
+        setTimeout(() => closePastSeminarModal(), 1200);
       } catch (err) {
         if (pastSeminarStatus) {
           pastSeminarStatus.style.color = '#b91c1c';

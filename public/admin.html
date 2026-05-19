@@ -558,6 +558,7 @@
               </div>
               <div style="display:flex; gap:0.55rem; flex-wrap:wrap;">
                 <button class="btn secondary" id="admin-toggle-deleted-seminars-btn" type="button" aria-expanded="false">Recently Deleted</button>
+                <button class="btn secondary" id="admin-record-past-seminar-btn" type="button">Backfill Seminar</button>
                 <button class="btn secondary" id="admin-import-attendance-btn" type="button">Import Attendance</button>
                 <button class="btn" type="button" data-scroll-target="admin-create-seminar-card">+ Create New Seminar</button>
               </div>
@@ -747,60 +748,6 @@
                     </div>
                   </li>
                 </ol>
-              </div>
-
-              <div class="card" style="margin-top:1.25rem;">
-                <h2 style="margin-top:0;">Add Past Seminar (Backfill)</h2>
-                <p class="muted">
-                  Use this when a seminar ran outside GIMS — e.g. during system downtime — and you need it in the system so attendance can be imported.
-                  The seminar will be created already marked as <strong>Held</strong>.
-                </p>
-                <form id="maintenance-past-seminar-form" class="split-grid" style="margin-top:0.75rem;">
-                  <label style="grid-column: 1 / -1;">
-                    Seminar Title <span style="color:#dc2626;">*</span>
-                    <input type="text" name="title" placeholder="Exact title as it should appear" required />
-                  </label>
-                  <label>
-                    Date Held <span style="color:#dc2626;">*</span>
-                    <input type="date" name="date" required />
-                  </label>
-                  <label>
-                    Start Time
-                    <input type="time" name="startTime" value="08:00" />
-                  </label>
-                  <label>
-                    Duration (hours)
-                    <input type="number" name="durationHours" min="0.5" step="0.5" value="1" />
-                  </label>
-                  <label>
-                    Mandatory?
-                    <select name="mandatory">
-                      <option value="false">Optional</option>
-                      <option value="true">Mandatory</option>
-                    </select>
-                  </label>
-                  <label>
-                    Capacity
-                    <input type="number" name="capacity" min="1" step="1" value="999" />
-                  </label>
-                  <label style="grid-column: 1 / -1;">
-                    Location
-                    <input type="text" name="location" placeholder="e.g. XU Auditorium" />
-                  </label>
-                  <label style="grid-column: 1 / -1;">
-                    Resource Person
-                    <input type="text" name="resourcePerson" placeholder="e.g. Dr. Juan Dela Cruz" />
-                  </label>
-                  <label style="grid-column: 1 / -1;">
-                    Description
-                    <textarea name="description" rows="2" placeholder="Optional — leave blank for a default backfill note."></textarea>
-                  </label>
-                  <div style="display:flex; gap:0.6rem; align-items:flex-end;">
-                    <button class="btn" type="submit">Create Past Seminar</button>
-                    <button class="btn secondary" type="reset">Clear</button>
-                  </div>
-                </form>
-                <p class="status" id="maintenance-past-seminar-status" style="margin-top:0.6rem;"></p>
               </div>
 
               <div class="card" style="margin-top:1.25rem;">
@@ -1270,6 +1217,67 @@
           <div id="admin-seminar-evaluations-summary" style="margin: 0.8rem 0 1rem;"></div>
           <div id="admin-seminar-evaluations-list" style="max-height: 60vh; overflow-y: auto;"></div>
           <p class="status" id="admin-seminar-evaluations-status"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Record Past Seminar Modal -->
+    <div class="modal-backdrop" id="admin-record-past-seminar-modal" role="dialog" aria-modal="true" aria-labelledby="admin-record-past-seminar-title" style="display:none;">
+      <div class="modal" style="width: min(720px, 100%);">
+        <div class="modal-header">
+          <h3 id="admin-record-past-seminar-title">Backfill Seminar</h3>
+          <button class="btn secondary" id="admin-record-past-seminar-close" type="button" aria-label="Close record past seminar modal">Close</button>
+        </div>
+        <div class="modal-content">
+          <p class="muted" style="margin-top:0;">
+            Use this for a seminar that already ran but isn't in GIMS yet — e.g. during system downtime. It will be created and marked <strong>Held</strong> immediately, so you can import attendance for it right away.
+          </p>
+          <form id="admin-record-past-seminar-form" class="split-grid" style="margin-top:0.5rem;">
+            <label style="grid-column: 1 / -1;">
+              Seminar Title <span style="color:#dc2626;">*</span>
+              <input type="text" name="title" placeholder="Exact title as it should appear" required />
+            </label>
+            <label>
+              Date Held <span style="color:#dc2626;">*</span>
+              <input type="date" name="date" required />
+            </label>
+            <label>
+              Start Time
+              <input type="time" name="startTime" value="08:00" />
+            </label>
+            <label>
+              Duration (hours)
+              <input type="number" name="durationHours" min="0.5" step="0.5" value="1" />
+            </label>
+            <label>
+              Mandatory?
+              <select name="mandatory">
+                <option value="false">Optional</option>
+                <option value="true">Mandatory</option>
+              </select>
+            </label>
+            <label>
+              Capacity
+              <input type="number" name="capacity" min="1" step="1" value="999" />
+            </label>
+            <label style="grid-column: 1 / -1;">
+              Location
+              <input type="text" name="location" placeholder="e.g. XU Auditorium" />
+            </label>
+            <label style="grid-column: 1 / -1;">
+              Resource Person
+              <input type="text" name="resourcePerson" placeholder="e.g. Dr. Juan Dela Cruz" />
+            </label>
+            <label style="grid-column: 1 / -1;">
+              Description
+              <textarea name="description" rows="2" placeholder="Optional — leave blank for a default backfill note."></textarea>
+            </label>
+            <div style="display:flex; gap:0.6rem; align-items:flex-end;">
+              <button class="btn" type="submit">Backfill Seminar</button>
+              <button class="btn secondary" type="reset">Clear</button>
+            </div>
+          </form>
+          <p class="status" id="admin-record-past-seminar-status" style="margin-top:0.6rem;"></p>
         </div>
       </div>
     </div>
