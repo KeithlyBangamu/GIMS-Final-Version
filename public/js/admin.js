@@ -3343,6 +3343,40 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     };
 
+    const buildEmployeesHtml = (employees) => {
+      if (!employees.length) {
+        return '<p class="muted" style="margin: 0.4rem 0;">No employees match that search.</p>';
+      }
+      return employees.map((e) => `
+        <details style="margin-bottom:0.4rem;">
+          <summary><strong>${escapeHtml(e.employee.name || '(unknown)')}</strong> <span class="muted">— ${escapeHtml(e.employee.department || '')}, ${e.registrations.length} record(s)</span></summary>
+          <ul style="margin:0.4rem 0 0.4rem 1.2rem;">
+            ${e.registrations.map((r) => `
+              <li>${escapeHtml(r.seminar.title || '(seminar)')} — ${escapeHtml(r.status || '')}${r.certificateIssued ? ` ✓ cert ${escapeHtml(r.certificateCode || '')}` : ''}</li>
+            `).join('')}
+          </ul>
+        </details>
+      `).join('');
+    };
+
+    const filterArchiveEmployees = (employees, query) => {
+      const q = String(query || '').trim().toLowerCase();
+      if (!q) return employees;
+      return employees.filter((e) => {
+        const name = String(e.employee?.name || '').toLowerCase();
+        const dept = String(e.employee?.department || '').toLowerCase();
+        const email = String(e.employee?.email || '').toLowerCase();
+        const position = String(e.employee?.position || '').toLowerCase();
+        if (name.includes(q) || dept.includes(q) || email.includes(q) || position.includes(q)) {
+          return true;
+        }
+        // Also match against seminar titles in their records.
+        return e.registrations.some((r) =>
+          String(r.seminar?.title || '').toLowerCase().includes(q)
+        );
+      });
+    };
+
     const viewArchive = async (sy) => {
       archiveDetail.innerHTML = `<p class="muted">Loading ${escapeHtml(sy)}…</p>`;
       try {
@@ -3352,26 +3386,52 @@ document.addEventListener('DOMContentLoaded', () => {
         const seminarsHtml = (data.seminars || []).map((s) => `
           <li><strong>${escapeHtml(s.title)}</strong> <span class="muted">— ${s.date ? new Date(s.date).toLocaleDateString() : ''}, ${escapeHtml(s.location || '')}</span></li>
         `).join('');
-        const employeesHtml = (data.employees || []).map((e) => `
-          <details style="margin-bottom:0.4rem;">
-            <summary><strong>${escapeHtml(e.employee.name || '(unknown)')}</strong> <span class="muted">— ${escapeHtml(e.employee.department || '')}, ${e.registrations.length} record(s)</span></summary>
-            <ul style="margin:0.4rem 0 0.4rem 1.2rem;">
-              ${e.registrations.map((r) => `
-                <li>${escapeHtml(r.seminar.title || '(seminar)')} — ${escapeHtml(r.status || '')}${r.certificateIssued ? ` ✓ cert ${escapeHtml(r.certificateCode || '')}` : ''}</li>
-              `).join('')}
-            </ul>
-          </details>
-        `).join('');
+
+        const allEmployees = Array.isArray(data.employees) ? data.employees : [];
+
         archiveDetail.innerHTML = `
           <div class="card" style="margin-top:0.5rem;">
             <h3 style="margin-top:0;">Archive — ${escapeHtml(data.schoolYear)}</h3>
             <p class="muted">${data.counts.seminars} seminar(s), ${data.counts.registrations} registration(s), ${data.counts.employees} employee(s).</p>
             <h4>Seminars</h4>
             <ul>${seminarsHtml || '<li class="muted">None</li>'}</ul>
-            <h4>Employees</h4>
-            ${employeesHtml || '<p class="muted">None</p>'}
+            <h4 style="margin-bottom:0.4rem;">Employees</h4>
+            <div style="display:flex; gap:0.6rem; align-items:center; margin-bottom:0.65rem; flex-wrap:wrap;">
+              <input
+                type="text"
+                id="archive-employee-search"
+                placeholder="Search by name, department, email, position, or seminar title…"
+                autocomplete="off"
+                style="flex:1; min-width:240px; padding:0.5rem 0.7rem; border:1px solid var(--border); border-radius:0.5rem;"
+              />
+              <span class="muted small" id="archive-employee-search-count"></span>
+            </div>
+            <div id="archive-employees-list">${buildEmployeesHtml(allEmployees)}</div>
           </div>
         `;
+
+        const searchInput = document.getElementById('archive-employee-search');
+        const listEl = document.getElementById('archive-employees-list');
+        const countEl = document.getElementById('archive-employee-search-count');
+
+        const updateCount = (visible) => {
+          if (!countEl) return;
+          if (visible === allEmployees.length) {
+            countEl.textContent = `${allEmployees.length} employee(s)`;
+          } else {
+            countEl.textContent = `${visible} of ${allEmployees.length} match`;
+          }
+        };
+
+        updateCount(allEmployees.length);
+
+        if (searchInput && listEl) {
+          searchInput.addEventListener('input', () => {
+            const filtered = filterArchiveEmployees(allEmployees, searchInput.value);
+            listEl.innerHTML = buildEmployeesHtml(filtered);
+            updateCount(filtered.length);
+          });
+        }
       } catch (err) {
         archiveDetail.innerHTML = `<p class="muted">${escapeHtml(err.message || 'Failed.')}</p>`;
       }
