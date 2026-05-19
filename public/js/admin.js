@@ -3475,6 +3475,55 @@ document.addEventListener('DOMContentLoaded', () => {
   setTopbarFromToken();
   setDeletedSeminarsModalVisibility(false);
   showNavModule('dashboard');
+  // ============== Add Past Seminar (Backfill) ==============
+  const pastSeminarForm = document.getElementById('maintenance-past-seminar-form');
+  const pastSeminarStatus = document.getElementById('maintenance-past-seminar-status');
+  if (pastSeminarForm) {
+    pastSeminarForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (pastSeminarStatus) pastSeminarStatus.textContent = 'Creating…';
+      try {
+        const fd = new FormData(pastSeminarForm);
+        const payload = {
+          title: fd.get('title'),
+          date: fd.get('date'),
+          startTime: fd.get('startTime'),
+          durationHours: Number(fd.get('durationHours')) || 1,
+          mandatory: fd.get('mandatory') === 'true',
+          capacity: Number(fd.get('capacity')) || 999,
+          location: fd.get('location'),
+          resourcePerson: fd.get('resourcePerson'),
+          description: fd.get('description'),
+        };
+        const res = await authedFetch('/api/admin/maintenance/seminars/past', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || 'Failed to create past seminar.');
+        if (pastSeminarStatus) {
+          pastSeminarStatus.style.color = '#059669';
+          pastSeminarStatus.textContent = data.message || 'Past seminar created.';
+        }
+        pastSeminarForm.reset();
+        const startTimeField = pastSeminarForm.querySelector('[name="startTime"]');
+        if (startTimeField) startTimeField.value = '08:00';
+        const durationField = pastSeminarForm.querySelector('[name="durationHours"]');
+        if (durationField) durationField.value = '1';
+        const capacityField = pastSeminarForm.querySelector('[name="capacity"]');
+        if (capacityField) capacityField.value = '999';
+        // Refresh seminars carousel so the new one appears.
+        if (typeof loadAll === 'function') loadAll().catch(() => {});
+      } catch (err) {
+        if (pastSeminarStatus) {
+          pastSeminarStatus.style.color = '#b91c1c';
+          pastSeminarStatus.textContent = err.message || 'Failed to create past seminar.';
+        }
+      }
+    });
+  }
+
   // ============== Attendance Import ==============
   const importBtn = document.getElementById('admin-import-attendance-btn');
   const importModal = document.getElementById('admin-import-attendance-modal');

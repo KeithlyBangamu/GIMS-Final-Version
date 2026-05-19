@@ -750,6 +750,60 @@
               </div>
 
               <div class="card" style="margin-top:1.25rem;">
+                <h2 style="margin-top:0;">Add Past Seminar (Backfill)</h2>
+                <p class="muted">
+                  Use this when a seminar ran outside GIMS — e.g. during system downtime — and you need it in the system so attendance can be imported.
+                  The seminar will be created already marked as <strong>Held</strong>.
+                </p>
+                <form id="maintenance-past-seminar-form" class="split-grid" style="margin-top:0.75rem;">
+                  <label style="grid-column: 1 / -1;">
+                    Seminar Title <span style="color:#dc2626;">*</span>
+                    <input type="text" name="title" placeholder="Exact title as it should appear" required />
+                  </label>
+                  <label>
+                    Date Held <span style="color:#dc2626;">*</span>
+                    <input type="date" name="date" required />
+                  </label>
+                  <label>
+                    Start Time
+                    <input type="time" name="startTime" value="08:00" />
+                  </label>
+                  <label>
+                    Duration (hours)
+                    <input type="number" name="durationHours" min="0.5" step="0.5" value="1" />
+                  </label>
+                  <label>
+                    Mandatory?
+                    <select name="mandatory">
+                      <option value="false">Optional</option>
+                      <option value="true">Mandatory</option>
+                    </select>
+                  </label>
+                  <label>
+                    Capacity
+                    <input type="number" name="capacity" min="1" step="1" value="999" />
+                  </label>
+                  <label style="grid-column: 1 / -1;">
+                    Location
+                    <input type="text" name="location" placeholder="e.g. XU Auditorium" />
+                  </label>
+                  <label style="grid-column: 1 / -1;">
+                    Resource Person
+                    <input type="text" name="resourcePerson" placeholder="e.g. Dr. Juan Dela Cruz" />
+                  </label>
+                  <label style="grid-column: 1 / -1;">
+                    Description
+                    <textarea name="description" rows="2" placeholder="Optional — leave blank for a default backfill note."></textarea>
+                  </label>
+                  <div style="display:flex; gap:0.6rem; align-items:flex-end;">
+                    <button class="btn" type="submit">Create Past Seminar</button>
+                    <button class="btn secondary" type="reset">Clear</button>
+                  </div>
+                </form>
+                <p class="status" id="maintenance-past-seminar-status" style="margin-top:0.6rem;"></p>
+              </div>
+
+              <div class="card" style="margin-top:1.25rem;">
                 <h2 style="margin-top:0;">Archived School Years</h2>
                 <p class="muted">Past school years that have been reset. Click one to view the seminars and employees archived that year, or re-download the masterlist CSV.</p>
                 <div id="maintenance-archives-list" style="margin-top:0.75rem;"></div>

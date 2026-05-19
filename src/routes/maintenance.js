@@ -820,4 +820,80 @@ router.post('/backfill-school-year', authMiddleware, async (req, res, next) => {
   }
 });
 
+// Quick-add a past seminar that ran outside GIMS (e.g. during downtime).
+// Creates the seminar already marked as held, so it can be used immediately
+// by the attendance import flow.
+router.post('/seminars/past', authMiddleware, async (req, res, next) => {
+  try {
+    const {
+      title,
+      date,
+      startTime,
+      durationHours,
+      location,
+      resourcePerson,
+      description,
+      mandatory,
+      capacity,
+    } = req.body || {};
+
+    if (!title || !String(title).trim()) {
+      return res.status(400).json({ message: 'Seminar title is required.' });
+    }
+    if (!date) {
+      return res.status(400).json({ message: 'Date is required.' });
+    }
+
+    const cleanTitle = String(title).trim();
+
+    const existing = await Seminar.findOne({ title: cleanTitle, isDeleted: { $ne: true } });
+    if (existing) {
+      return res.status(409).json({
+        message: `A seminar titled "${cleanTitle}" already exists. Use the attendance import directly.`,
+        seminar: { id: existing._id, title: existing.title, isHeld: existing.isHeld },
+      });
+    }
+
+    const heldDate = new Date(date);
+    if (Number.isNaN(heldDate.getTime())) {
+      return res.status(400).json({ message: 'Invalid date.' });
+    }
+
+    const seminar = await Seminar.create({
+      title: cleanTitle,
+      description: String(description || '').trim() || `Past seminar recorded via Maintenance backfill on ${new Date().toISOString().slice(0, 10)}.`,
+      location: String(location || '').trim(),
+      resourcePerson: String(resourcePerson || '').trim(),
+      date: heldDate,
+      startTime: String(startTime || '08:00').trim(),
+      durationHours: Number(durationHours) > 0 ? Number(durationHours) : 1,
+      mandatory: mandatory === true || mandatory === 'true',
+      capacity: Number(capacity) > 0 ? Number(capacity) : 999,
+      isHeld: true,
+      heldAt: new Date(),
+      createdBy: req.user?.id,
+      certificateReleaseMode: 'evaluation',
+    });
+
+    try {
+      await MaintenanceLog.create({
+        action: 'attendance-import',
+        schoolYear: getSchoolYear(heldDate) || currentSchoolYear() || 'unknown',
+        triggeredBy: req.user?.id,
+        triggeredByEmail: req.user?.email,
+        notes: `Past seminar backfilled: "${cleanTitle}" (${heldDate.toISOString().slice(0, 10)}).`,
+      });
+    } catch (logErr) {
+      console.error('Failed to write past-seminar maintenance log:', logErr.message);
+    }
+
+    res.status(201).json({
+      message: 'Past seminar created. You can now import attendance for it.',
+      seminar,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
