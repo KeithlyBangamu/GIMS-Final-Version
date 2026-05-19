@@ -11,6 +11,8 @@ const MaintenanceLogSchema = new mongoose.Schema(
         'attendance-import',
         'snapshot-create',
         'snapshot-restore',
+        'weekly-export-download',
+        'weekly-export-confirmed',
       ],
       index: true,
     },

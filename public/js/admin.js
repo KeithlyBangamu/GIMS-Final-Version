@@ -3475,6 +3475,127 @@ document.addEventListener('DOMContentLoaded', () => {
   setTopbarFromToken();
   setDeletedSeminarsModalVisibility(false);
   showNavModule('dashboard');
+  // ============== Weekly Backup Banner (hero) ==============
+  const weeklyBackupBanner = document.getElementById('weekly-backup-banner');
+  const weeklyBackupHeadline = document.getElementById('weekly-backup-headline');
+  const weeklyBackupSub = document.getElementById('weekly-backup-sub');
+  const weeklyBackupDownloadBtn = document.getElementById('weekly-backup-download-btn');
+  const weeklyBackupConfirmBtn = document.getElementById('weekly-backup-confirm-btn');
+
+  let weeklyBackupDownloadedThisSession = false;
+
+  const renderWeeklyBackupBanner = (data) => {
+    if (!weeklyBackupBanner) return;
+    weeklyBackupBanner.classList.remove('is-ok', 'is-upcoming', 'is-overdue');
+    weeklyBackupBanner.style.display = 'flex';
+
+    const days = data?.daysSince;
+    const interval = data?.intervalDays || 7;
+
+    if (data?.isOverdue) {
+      weeklyBackupBanner.classList.add('is-overdue');
+      const dayLabel = !data?.lastConfirmedAt
+        ? 'never'
+        : `${Math.floor(days)} day${Math.floor(days) === 1 ? '' : 's'} ago`;
+      weeklyBackupHeadline.textContent = '⚠ Weekly backup overdue — Back up now';
+      weeklyBackupSub.textContent = `Last confirmed: ${dayLabel}. Required every ${interval} days.`;
+    } else if (data?.isUpcoming) {
+      weeklyBackupBanner.classList.add('is-upcoming');
+      const remaining = Math.max(0, Math.ceil(interval - days));
+      weeklyBackupHeadline.textContent = 'Weekly backup due soon';
+      weeklyBackupSub.textContent = `Next required in ~${remaining} day${remaining === 1 ? '' : 's'}.`;
+    } else {
+      weeklyBackupBanner.classList.add('is-ok');
+      const ago = days != null ? Math.floor(days) : null;
+      weeklyBackupHeadline.textContent = '✓ Weekly backup up to date';
+      const remaining = days != null ? Math.max(0, Math.ceil(interval - days)) : interval;
+      weeklyBackupSub.textContent = ago != null
+        ? `Last confirmed ${ago} day${ago === 1 ? '' : 's'} ago. Next required in ~${remaining} day${remaining === 1 ? '' : 's'}.`
+        : `Required every ${interval} days.`;
+    }
+
+    if (weeklyBackupConfirmBtn) {
+      const enable = weeklyBackupDownloadedThisSession;
+      weeklyBackupConfirmBtn.disabled = !enable;
+      weeklyBackupConfirmBtn.title = enable
+        ? 'Click to mark this week\'s backup as saved.'
+        : 'Download the CSV first, then click here once you\'ve saved it.';
+    }
+  };
+
+  const refreshWeeklyBackupStatus = async () => {
+    try {
+      const res = await authedFetch('/api/admin/maintenance/weekly-export/status');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || 'Failed to load backup status.');
+      renderWeeklyBackupBanner(data);
+    } catch (err) {
+      console.error('[weekly-backup] status failed', err);
+      if (weeklyBackupBanner) weeklyBackupBanner.style.display = 'none';
+    }
+  };
+
+  if (weeklyBackupDownloadBtn) {
+    weeklyBackupDownloadBtn.addEventListener('click', async () => {
+      try {
+        weeklyBackupDownloadBtn.disabled = true;
+        const original = weeklyBackupDownloadBtn.textContent;
+        weeklyBackupDownloadBtn.textContent = 'Preparing…';
+
+        const res = await authedFetch('/api/admin/maintenance/weekly-export.csv');
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data?.message || 'Failed to generate backup CSV.');
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `GIMS-Weekly-Backup-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        weeklyBackupDownloadedThisSession = true;
+        weeklyBackupDownloadBtn.textContent = '✓ Downloaded';
+        if (weeklyBackupConfirmBtn) {
+          weeklyBackupConfirmBtn.disabled = false;
+          weeklyBackupConfirmBtn.title = 'Click to mark this week\'s backup as saved.';
+        }
+        setTimeout(() => {
+          weeklyBackupDownloadBtn.textContent = original;
+          weeklyBackupDownloadBtn.disabled = false;
+        }, 2000);
+      } catch (err) {
+        console.error('[weekly-backup] download failed', err);
+        weeklyBackupDownloadBtn.textContent = 'Download Backup (CSV)';
+        weeklyBackupDownloadBtn.disabled = false;
+        alert(err.message || 'Failed to download backup CSV.');
+      }
+    });
+  }
+
+  if (weeklyBackupConfirmBtn) {
+    weeklyBackupConfirmBtn.addEventListener('click', async () => {
+      if (!confirm('Confirm that you have saved this week\'s backup CSV to a secure location (Google Drive, USB, network share, etc.)?')) return;
+      try {
+        weeklyBackupConfirmBtn.disabled = true;
+        const res = await authedFetch('/api/admin/maintenance/weekly-export/confirm', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || 'Failed to confirm backup.');
+        weeklyBackupDownloadedThisSession = false;
+        await refreshWeeklyBackupStatus();
+      } catch (err) {
+        console.error('[weekly-backup] confirm failed', err);
+        alert(err.message || 'Failed to confirm backup.');
+        weeklyBackupConfirmBtn.disabled = false;
+      }
+    });
+  }
+
+  refreshWeeklyBackupStatus().catch(() => {});
+
   // ============== Database Snapshot ==============
   const snapshotRunBtn = document.getElementById('snapshot-run-btn');
   const snapshotRestoreBtn = document.getElementById('snapshot-restore-btn');

@@ -432,8 +432,71 @@
       <div class="hero-inner">
         <h1>GIMS Admin Dashboard</h1>
         <p class="muted">Monitor seminar compliance, manage participants, and export reports.</p>
+
+        <div id="weekly-backup-banner" class="weekly-backup-banner" style="display:none;">
+          <div class="weekly-backup-banner-text">
+            <strong id="weekly-backup-headline">Back up now</strong>
+            <span id="weekly-backup-sub" class="weekly-backup-banner-sub"></span>
+          </div>
+          <div class="weekly-backup-banner-actions">
+            <button class="btn" id="weekly-backup-download-btn" type="button">Download Backup (CSV)</button>
+            <button class="btn secondary" id="weekly-backup-confirm-btn" type="button" disabled title="Download first, then confirm you saved it.">Confirm Saved</button>
+          </div>
+        </div>
       </div>
     </section>
+    <style>
+      .weekly-backup-banner {
+        margin-top: 1rem;
+        padding: 0.85rem 1.1rem;
+        border-radius: 0.7rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+        border: 1px solid rgba(255,255,255,0.25);
+        background: rgba(255,255,255,0.10);
+        backdrop-filter: blur(4px);
+      }
+      .weekly-backup-banner.is-ok {
+        background: rgba(16,185,129,0.20);
+        border-color: rgba(16,185,129,0.50);
+      }
+      .weekly-backup-banner.is-upcoming {
+        background: rgba(245,158,11,0.22);
+        border-color: rgba(245,158,11,0.55);
+      }
+      .weekly-backup-banner.is-overdue {
+        background: rgba(220,38,38,0.28);
+        border-color: rgba(220,38,38,0.65);
+        animation: weeklyBackupPulse 2.6s ease-in-out infinite;
+      }
+      @keyframes weeklyBackupPulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.0); }
+        50% { box-shadow: 0 0 0 6px rgba(220,38,38,0.18); }
+      }
+      .weekly-backup-banner-text {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        min-width: 0;
+        color: #fff;
+      }
+      .weekly-backup-banner-text strong {
+        font-size: 1rem;
+        letter-spacing: 0.01em;
+      }
+      .weekly-backup-banner-sub {
+        font-size: 0.85rem;
+        opacity: 0.92;
+      }
+      .weekly-backup-banner-actions {
+        display: flex;
+        gap: 0.55rem;
+        flex-wrap: wrap;
+      }
+    </style>
 
     <main class="container">
       <div class="dashboard-layout">

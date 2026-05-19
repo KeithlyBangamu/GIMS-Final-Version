@@ -999,4 +999,143 @@ router.post('/snapshot/restore', authMiddleware, async (req, res, next) => {
   }
 });
 
+// ============== Weekly CSV Export (human-held backup) ==============
+
+const WEEKLY_EXPORT_DAYS = Number(process.env.WEEKLY_EXPORT_DAYS || 7);
+
+const csvEscape = (value) => {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return value.toISOString();
+  let s;
+  if (typeof value === 'object') {
+    try { s = JSON.stringify(value); } catch { s = String(value); }
+  } else {
+    s = String(value);
+  }
+  // RFC 4180: quote if contains comma, quote, newline; escape quotes by doubling.
+  if (/[",\r\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+};
+
+const buildCsvForCollection = async (collName) => {
+  const db = (await import('mongoose')).default.connection.db;
+  const coll = db.collection(collName);
+  const docs = await coll.find({}).toArray();
+  if (!docs.length) return `# ${collName} (0 rows)\n\n`;
+
+  // Determine column union across all docs so heterogeneous documents still render.
+  const colSet = new Set();
+  for (const doc of docs) {
+    Object.keys(doc).forEach((k) => colSet.add(k));
+  }
+  // Prefer _id and createdAt first when present
+  const cols = ['_id', ...Array.from(colSet).filter((c) => c !== '_id')];
+
+  const lines = [];
+  lines.push(`# ${collName} (${docs.length} rows)`);
+  lines.push(cols.map(csvEscape).join(','));
+  for (const doc of docs) {
+    lines.push(cols.map((c) => csvEscape(doc[c])).join(','));
+  }
+  lines.push('');
+  lines.push('');
+  return lines.join('\r\n');
+};
+
+router.get('/weekly-export.csv', authMiddleware, async (req, res, next) => {
+  try {
+    const mongoose = (await import('mongoose')).default;
+    const db = mongoose.connection.db;
+    const allColls = await db.listCollections({}, { nameOnly: false }).toArray();
+    const names = allColls
+      .filter((c) => c.type === 'collection' && !c.name.startsWith('system.'))
+      .map((c) => c.name)
+      .sort();
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="GIMS-Weekly-Backup-${stamp}.csv"`
+    );
+
+    res.write(`# GIMS Weekly Backup\r\n`);
+    res.write(`# Generated at: ${new Date().toISOString()}\r\n`);
+    res.write(`# Collections: ${names.length}\r\n`);
+    res.write(`\r\n`);
+
+    for (const name of names) {
+      const block = await buildCsvForCollection(name);
+      res.write(block);
+    }
+    res.end();
+
+    // Log the download (best-effort, don't fail the response if logging fails).
+    MaintenanceLog.create({
+      action: 'weekly-export-download',
+      schoolYear: currentSchoolYear() || 'unknown',
+      triggeredBy: req.user?.id,
+      triggeredByEmail: req.user?.email,
+      notes: `Weekly backup CSV downloaded (${names.length} collections).`,
+    }).catch((err) => console.error('[weekly-export] log failed:', err.message));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/weekly-export/confirm', authMiddleware, async (req, res, next) => {
+  try {
+    await MaintenanceLog.create({
+      action: 'weekly-export-confirmed',
+      schoolYear: currentSchoolYear() || 'unknown',
+      triggeredBy: req.user?.id,
+      triggeredByEmail: req.user?.email,
+      notes: 'Admin confirmed they saved the weekly backup CSV.',
+    });
+    res.json({ message: 'Weekly backup confirmed. Thank you.', confirmedAt: new Date() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/weekly-export/status', authMiddleware, async (req, res, next) => {
+  try {
+    const last = await MaintenanceLog.findOne({ action: 'weekly-export-confirmed' })
+      .sort({ createdAt: -1 })
+      .select('createdAt triggeredByEmail');
+
+    const intervalMs = WEEKLY_EXPORT_DAYS * 24 * 60 * 60 * 1000;
+    let daysSince = null;
+    let isOverdue = true;
+    let isUpcoming = false;
+    let nextDueAt = null;
+    let lastConfirmedAt = null;
+    let lastConfirmedBy = null;
+
+    if (last) {
+      lastConfirmedAt = last.createdAt;
+      lastConfirmedBy = last.triggeredByEmail || null;
+      const ageMs = Date.now() - new Date(last.createdAt).getTime();
+      daysSince = ageMs / (24 * 60 * 60 * 1000);
+      isOverdue = ageMs >= intervalMs;
+      isUpcoming = !isOverdue && ageMs >= (intervalMs - 2 * 24 * 60 * 60 * 1000);
+      nextDueAt = new Date(new Date(last.createdAt).getTime() + intervalMs);
+    }
+
+    res.json({
+      intervalDays: WEEKLY_EXPORT_DAYS,
+      lastConfirmedAt,
+      lastConfirmedBy,
+      daysSince,
+      isOverdue,
+      isUpcoming,
+      nextDueAt,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
