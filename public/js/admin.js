@@ -381,7 +381,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const sessions = Array.isArray(seminar.sessions) && seminar.sessions.length > 0
       ? seminar.sessions
       : [{ date: seminar.date, startTime: seminar.startTime, durationHours: seminar.durationHours }];
-    let latest = null;
+    let earliest = null;
     for (const sess of sessions) {
       if (!sess?.date) continue;
       const d = new Date(sess.date);
@@ -390,19 +390,15 @@ document.addEventListener('DOMContentLoaded', () => {
       if (m) {
         d.setHours(Number(m[1]), Number(m[2]), 0, 0);
       }
-      const duration = Number(sess.durationHours || 0);
-      if (duration > 0) {
-        d.setTime(d.getTime() + duration * 60 * 60 * 1000);
-      }
-      if (!latest || d.getTime() > latest.getTime()) latest = d;
+      if (!earliest || d.getTime() < earliest.getTime()) earliest = d;
     }
-    return latest;
+    return earliest;
   };
 
   const hasSeminarTimeElapsed = (seminar) => {
-    const end = getSeminarEndTime(seminar);
-    if (!end) return true; // unknown — don't block
-    return Date.now() >= end.getTime();
+    const start = getSeminarEndTime(seminar);
+    if (!start) return true; // unknown — don't block
+    return Date.now() >= start.getTime();
   };
 
   /** Multi-day seminar: list each session date & time (Manage Seminars cards). */
@@ -1960,7 +1956,7 @@ document.addEventListener('DOMContentLoaded', () => {
         seminarHeldBtn.disabled = blocked;
         seminarHeldBtn.textContent = isHeld ? 'Unmark Held' : 'Mark as Held';
         seminarHeldBtn.title = blocked
-          ? `Available after the seminar end time (${formatDate(getSeminarEndTime(seminar))}).`
+          ? `Available after the seminar start time (${formatDate(getSeminarEndTime(seminar))}).`
           : '';
       }
       if (markAttendanceBtn) markAttendanceBtn.disabled = !isHeld;
@@ -2036,7 +2032,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const elapsed = hasSeminarTimeElapsed(seminar);
                 const disable = !seminar.isHeld && !elapsed;
                 const title = disable
-                  ? `Available after the seminar end time (${formatDate(getSeminarEndTime(seminar))}).`
+                  ? `Available after the seminar start time (${formatDate(getSeminarEndTime(seminar))}).`
                   : '';
                 return `<button class="btn secondary" type="button" data-seminar-held="${seminar._id}" style="${wideButtonStyle}" ${disable ? 'disabled aria-disabled="true"' : ''} title="${escapeHtml(title)}">${seminar.isHeld ? 'Unmark Held' : 'Mark as Held'}</button>`;
               })()}
@@ -2080,7 +2076,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!seminar.isHeld && !hasSeminarTimeElapsed(seminar)) {
           if (seminarsStatusEl) {
             const end = getSeminarEndTime(seminar);
-            seminarsStatusEl.textContent = `Cannot mark as held yet — seminar ends ${formatDate(end)}.`;
+            seminarsStatusEl.textContent = `Cannot mark as held yet — seminar starts ${formatDate(end)}.`;
           }
           return;
         }
@@ -2764,7 +2760,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (seminar && !seminar.isHeld && !hasSeminarTimeElapsed(seminar)) {
       if (seminarParticipantsStatusEl) {
         const end = getSeminarEndTime(seminar);
-        seminarParticipantsStatusEl.textContent = `Cannot mark as held yet — seminar ends ${formatDate(end)}.`;
+        seminarParticipantsStatusEl.textContent = `Cannot mark as held yet — seminar starts ${formatDate(end)}.`;
       }
       return;
     }
