@@ -3500,6 +3500,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   if (pastSeminarCloseBtn) pastSeminarCloseBtn.addEventListener('click', closePastSeminarModal);
+  if (pastSeminarModal) {
+    pastSeminarModal.addEventListener('click', (event) => {
+      if (event.target === pastSeminarModal) closePastSeminarModal();
+    });
+  }
 
   if (pastSeminarForm) {
     pastSeminarForm.addEventListener('submit', async (event) => {
@@ -3532,10 +3537,6 @@ document.addEventListener('DOMContentLoaded', () => {
         pastSeminarForm.reset();
         const startTimeField = pastSeminarForm.querySelector('[name="startTime"]');
         if (startTimeField) startTimeField.value = '08:00';
-        const durationField = pastSeminarForm.querySelector('[name="durationHours"]');
-        if (durationField) durationField.value = '1';
-        const capacityField = pastSeminarForm.querySelector('[name="capacity"]');
-        if (capacityField) capacityField.value = '999';
         // Refresh seminars carousel so the new one appears.
         if (typeof loadAll === 'function') loadAll().catch(() => {});
         // Auto-close the modal after a moment so the admin sees the success message.
@@ -3644,6 +3645,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   if (importClose) importClose.addEventListener('click', closeImportModal);
+  if (importModal) {
+    importModal.addEventListener('click', (event) => {
+      if (event.target === importModal) closeImportModal();
+    });
+  }
+  if (confirmModal) {
+    confirmModal.addEventListener('click', (event) => {
+      if (event.target === confirmModal) closeConfirmPopup();
+    });
+  }
   if (importCancelBtn) importCancelBtn.addEventListener('click', () => {
     importPreviewWrap.style.display = 'none';
     resetImportState();
