@@ -135,6 +135,14 @@ const findActiveSeminarById = (id) => {
   return Seminar.findOne({ _id: id, isDeleted: { $ne: true } });
 };
 
+// Returns true if the employee exists and is not deactivated. Used to gate
+// notifications and emails so deactivated accounts are silent.
+const isEmployeeActive = async (employeeId) => {
+  if (!employeeId) return false;
+  const e = await Employee.findById(employeeId).select('accountStatus');
+  return !!e && e.accountStatus !== 'deactivated';
+};
+
 const buildActiveSeminarIdSet = async () => {
   const activeSeminars = await Seminar.find({ isDeleted: { $ne: true } }).select('_id').lean();
   return new Set(activeSeminars.map((s) => String(s._id)));
@@ -887,6 +895,7 @@ router.post('/seminars/:id/attendance/finalize', authMiddleware, async (req, res
 
     const attendedRegs = registrations.filter((r) => r.status === 'attended');
     for (const reg of attendedRegs) {
+      if (!(await isEmployeeActive(reg.employeeID))) continue;
       await Notification.create({
         employeeID: reg.employeeID,
         type: 'evaluation',
@@ -1020,14 +1029,16 @@ router.post('/seminars/:id/approve', authMiddleware, async (req, res, next) => {
       reg.status = 'registered';
       await reg.save();
 
-      // Create approval notification
-      await Notification.create({
-        employeeID: reg.employeeID._id,
-        type: 'approval',
-        message: `You are officially part of the seminar: "${seminar.title}". You have been approved as an Official Participant.`,
-        seminarID: seminar._id,
-        registrationID: reg._id,
-      });
+      // Create approval notification (skip for deactivated employees)
+      if (await isEmployeeActive(reg.employeeID._id)) {
+        await Notification.create({
+          employeeID: reg.employeeID._id,
+          type: 'approval',
+          message: `You are officially part of the seminar: "${seminar.title}". You have been approved as an Official Participant.`,
+          seminarID: seminar._id,
+          registrationID: reg._id,
+        });
+      }
 
       approvedCount += 1;
     }
@@ -1138,9 +1149,10 @@ router.post('/seminars/:id/attendance', authMiddleware, async (req, res, next) =
       );
     }
 
-    // Send evaluation notifications to attendees
+    // Send evaluation notifications to attendees (skip for deactivated employees)
     const attendedRegs = registrations.filter((r) => r.status === 'attended');
     for (const reg of attendedRegs) {
+      if (!(await isEmployeeActive(reg.employeeID))) continue;
       await Notification.create({
         employeeID: reg.employeeID,
         type: 'evaluation',

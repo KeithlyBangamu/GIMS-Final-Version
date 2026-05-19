@@ -376,7 +376,12 @@ export const sendSeminarReminderEmail = async ({ employee, seminar, sessionDate,
 export const sendNewSeminarAnnouncement = async ({ seminar }) => {
   if (!seminar) return { sent: 0 };
 
-  const recipients = await Employee.find({}).select('email').lean();
+  const recipients = await Employee.find({
+    accountStatus: { $ne: 'deactivated' },
+    role: 'employee',
+  })
+    .select('email')
+    .lean();
   const emails = recipients
     .map((e) => (e?.email || '').trim().toLowerCase())
     .filter(Boolean);

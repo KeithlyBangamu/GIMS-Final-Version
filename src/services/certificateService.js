@@ -1,4 +1,5 @@
 import puppeteer from 'puppeteer';
+import Employee from '../models/Employee.js';
 import { sendCertificateEmail } from './emailService.js';
 
 const escapeHtml = (value) => {
@@ -258,16 +259,26 @@ export const issueCertificateForRegistration = async ({
   if (String(registration.status || '').toLowerCase() !== 'attended') return null;
   if (registration.certificateIssued) return registration;
 
+  // Defensive: callers sometimes pass a stub { _id } without accountStatus/email.
+  // Load the real employee so the deactivation gate works correctly.
+  let employeeRecord = employee;
+  if (employee && employee._id && (employee.accountStatus === undefined || employee.email === undefined)) {
+    const fetched = await Employee.findById(employee._id);
+    if (fetched) employeeRecord = fetched;
+  }
+
   registration.certificateIssued = true;
   registration.certificateIssuedAt = new Date();
   registration.certificateCode =
     registration.certificateCode ||
-    makeCertificateCode({ seminarId: seminar._id, employeeId: employee._id, registrationId: registration._id });
+    makeCertificateCode({ seminarId: seminar._id, employeeId: employeeRecord._id, registrationId: registration._id });
   await registration.save();
 
-  if (Notification) {
+  const isDeactivated = employeeRecord.accountStatus === 'deactivated';
+
+  if (Notification && !isDeactivated) {
     await Notification.create({
-      employeeID: employee._id,
+      employeeID: employeeRecord._id,
       type: 'certificate',
       message: `Your certificate for \"${seminar.title}\" is now available. You can download it from your dashboard.`,
       seminarID: seminar._id,
@@ -275,8 +286,8 @@ export const issueCertificateForRegistration = async ({
     });
   }
 
-  if (employee.email) {
-    queueCertificateEmail({ employee, seminar, registration });
+  if (employeeRecord.email && !isDeactivated) {
+    queueCertificateEmail({ employee: employeeRecord, seminar, registration });
   }
 
   return registration;
