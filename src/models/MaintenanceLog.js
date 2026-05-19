@@ -5,7 +5,7 @@ const MaintenanceLogSchema = new mongoose.Schema(
     action: {
       type: String,
       required: true,
-      enum: ['school-year-reset', 'school-year-restore'],
+      enum: ['school-year-reset', 'school-year-restore', 'attendance-import'],
       index: true,
     },
     schoolYear: { type: String, required: true, index: true },

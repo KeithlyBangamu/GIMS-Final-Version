@@ -558,6 +558,7 @@
               </div>
               <div style="display:flex; gap:0.55rem; flex-wrap:wrap;">
                 <button class="btn secondary" id="admin-toggle-deleted-seminars-btn" type="button" aria-expanded="false">Recently Deleted</button>
+                <button class="btn secondary" id="admin-import-attendance-btn" type="button">Import Attendance</button>
                 <button class="btn" type="button" data-scroll-target="admin-create-seminar-card">+ Create New Seminar</button>
               </div>
             </div>
@@ -1215,6 +1216,74 @@
           <div id="admin-seminar-evaluations-summary" style="margin: 0.8rem 0 1rem;"></div>
           <div id="admin-seminar-evaluations-list" style="max-height: 60vh; overflow-y: auto;"></div>
           <p class="status" id="admin-seminar-evaluations-status"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Import Attendance Modal -->
+    <div class="modal-backdrop" id="admin-import-attendance-modal" role="dialog" aria-modal="true" aria-labelledby="admin-import-attendance-title" style="display:none;">
+      <div class="modal" style="width: min(820px, 100%);">
+        <div class="modal-header">
+          <h3 id="admin-import-attendance-title">Import Attendance from Excel</h3>
+          <button class="btn secondary" id="admin-import-attendance-close" type="button" aria-label="Close import attendance modal">Close</button>
+        </div>
+        <div class="modal-content">
+          <p class="muted" style="margin-top:0;">
+            Use this when seminars were recorded outside GIMS (e.g. during system downtime). Download the template, fill it in, and upload it back.
+          </p>
+
+          <ol style="padding-left:1.1rem; margin:0 0 1rem;">
+            <li style="margin-bottom:0.35rem;">Click <strong>Download Template</strong> to get an Excel file pre-filled with valid employee emails and seminar titles (see <em>Reference</em> sheet).</li>
+            <li style="margin-bottom:0.35rem;">Fill in one row per attendance record. Required columns: <strong>Employee Email</strong>, <strong>Seminar Title</strong>, <strong>Date Attended</strong>.</li>
+            <li style="margin-bottom:0;">Upload the filled template. You'll see a preview before anything is saved.</li>
+          </ol>
+
+          <div style="display:flex; gap:0.6rem; flex-wrap:wrap; align-items:center; padding:0.75rem; border:1px solid var(--border); border-radius:0.55rem; background:rgba(32,58,115,0.04);">
+            <button class="btn secondary" id="admin-import-download-template-btn" type="button">📥 Download Template (.xlsx)</button>
+            <label class="btn" style="margin-bottom:0; cursor:pointer;">
+              📤 Choose Filled Template
+              <input type="file" id="admin-import-file-input" accept=".xlsx,.xls" style="display:none;" />
+            </label>
+            <span class="muted small" id="admin-import-file-name" style="margin-left:0.3rem;">No file chosen</span>
+          </div>
+
+          <div id="admin-import-preview-wrap" style="display:none; margin-top:1rem;">
+            <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center; margin-bottom:0.55rem;">
+              <strong>Preview:</strong>
+              <span class="muted small" id="admin-import-preview-summary"></span>
+            </div>
+            <div id="admin-import-preview-table" style="max-height: 38vh; overflow:auto; border:1px solid var(--border); border-radius:0.5rem;"></div>
+
+            <label style="display:flex; align-items:center; gap:0.55rem; margin-top:0.9rem; padding:0.6rem 0.8rem; border:1px solid rgba(16,185,129,0.3); background:rgba(16,185,129,0.08); border-radius:0.5rem; cursor:pointer;">
+              <input type="checkbox" id="admin-import-issue-certs" checked style="width:1rem; height:1rem;" />
+              <span><strong>Issue certificates for imported attendees.</strong> <span class="muted small">— Recommended for downtime backfills.</span></span>
+            </label>
+
+            <div style="display:flex; gap:0.6rem; justify-content:flex-end; margin-top:1rem;">
+              <button class="btn secondary" id="admin-import-cancel-btn" type="button">Cancel</button>
+              <button class="btn" id="admin-import-commit-btn" type="button">Confirm Import</button>
+            </div>
+          </div>
+
+          <p class="status" id="admin-import-status" style="margin-top:0.9rem;"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Import Confirm Popup -->
+    <div class="modal-backdrop" id="admin-import-confirm-modal" role="dialog" aria-modal="true" style="display:none;">
+      <div class="modal" style="width: min(480px, 100%);">
+        <div class="modal-header">
+          <h3 style="margin:0;">Confirm Import</h3>
+        </div>
+        <div class="modal-content">
+          <p style="margin-top:0;" id="admin-import-confirm-text">You are about to import attendance records.</p>
+          <p id="admin-import-confirm-cert-line" style="margin:0.4rem 0 0; padding:0.6rem 0.75rem; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.3); border-radius:0.5rem;"></p>
+          <p class="muted small" style="margin-top:0.85rem;">This action cannot be undone from the UI.</p>
+          <div style="display:flex; gap:0.6rem; justify-content:flex-end; margin-top:1rem;">
+            <button class="btn secondary" id="admin-import-confirm-cancel" type="button">Cancel</button>
+            <button class="btn" id="admin-import-confirm-ok" type="button">Yes, Import</button>
+          </div>
         </div>
       </div>
     </div>

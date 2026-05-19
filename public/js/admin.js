@@ -3475,6 +3475,232 @@ document.addEventListener('DOMContentLoaded', () => {
   setTopbarFromToken();
   setDeletedSeminarsModalVisibility(false);
   showNavModule('dashboard');
+  // ============== Attendance Import ==============
+  const importBtn = document.getElementById('admin-import-attendance-btn');
+  const importModal = document.getElementById('admin-import-attendance-modal');
+  const importClose = document.getElementById('admin-import-attendance-close');
+  const importDownloadBtn = document.getElementById('admin-import-download-template-btn');
+  const importFileInput = document.getElementById('admin-import-file-input');
+  const importFileName = document.getElementById('admin-import-file-name');
+  const importPreviewWrap = document.getElementById('admin-import-preview-wrap');
+  const importPreviewSummary = document.getElementById('admin-import-preview-summary');
+  const importPreviewTable = document.getElementById('admin-import-preview-table');
+  const importIssueCerts = document.getElementById('admin-import-issue-certs');
+  const importCancelBtn = document.getElementById('admin-import-cancel-btn');
+  const importCommitBtn = document.getElementById('admin-import-commit-btn');
+  const importStatus = document.getElementById('admin-import-status');
+  const confirmModal = document.getElementById('admin-import-confirm-modal');
+  const confirmText = document.getElementById('admin-import-confirm-text');
+  const confirmCertLine = document.getElementById('admin-import-confirm-cert-line');
+  const confirmOk = document.getElementById('admin-import-confirm-ok');
+  const confirmCancel = document.getElementById('admin-import-confirm-cancel');
+
+  let importSelectedFile = null;
+  let importPreviewData = null;
+
+  const resetImportState = () => {
+    importSelectedFile = null;
+    importPreviewData = null;
+    if (importFileInput) importFileInput.value = '';
+    if (importFileName) importFileName.textContent = 'No file chosen';
+    if (importPreviewWrap) importPreviewWrap.style.display = 'none';
+    if (importPreviewTable) importPreviewTable.innerHTML = '';
+    if (importPreviewSummary) importPreviewSummary.textContent = '';
+    if (importStatus) importStatus.textContent = '';
+  };
+
+  const renderImportPreview = (data) => {
+    if (!importPreviewTable || !importPreviewSummary || !importPreviewWrap) return;
+    const valid = Array.isArray(data?.valid) ? data.valid : [];
+    const errors = Array.isArray(data?.errors) ? data.errors : [];
+
+    importPreviewSummary.innerHTML =
+      `<strong style="color:#059669;">${valid.length} valid</strong> &nbsp;·&nbsp; ` +
+      `<strong style="color:#b91c1c;">${errors.length} error${errors.length === 1 ? '' : 's'}</strong> ` +
+      `&nbsp;·&nbsp; ${data?.totalRows || 0} total row(s) parsed`;
+
+    const cell = (v) => `<td style="padding:0.45rem 0.6rem; border-bottom:1px solid var(--border); font-size:0.85rem;">${escapeHtml(String(v ?? ''))}</td>`;
+
+    const header = `
+      <thead style="background:#f3f4f6; position:sticky; top:0;">
+        <tr>
+          <th style="padding:0.45rem 0.6rem; text-align:left; font-size:0.78rem;">Row</th>
+          <th style="padding:0.45rem 0.6rem; text-align:left; font-size:0.78rem;">Email</th>
+          <th style="padding:0.45rem 0.6rem; text-align:left; font-size:0.78rem;">Seminar</th>
+          <th style="padding:0.45rem 0.6rem; text-align:left; font-size:0.78rem;">Date</th>
+          <th style="padding:0.45rem 0.6rem; text-align:left; font-size:0.78rem;">Eval?</th>
+          <th style="padding:0.45rem 0.6rem; text-align:left; font-size:0.78rem;">Status</th>
+        </tr>
+      </thead>`;
+
+    const validRows = valid.map((r) => `
+      <tr style="background:rgba(16,185,129,0.04);">
+        ${cell(r.rowNumber)}
+        ${cell(r.email)}
+        ${cell(r.title)}
+        ${cell(r.dateAttended)}
+        ${cell(r.evaluationCompleted ? 'yes' : 'no')}
+        <td style="padding:0.45rem 0.6rem; border-bottom:1px solid var(--border); font-size:0.85rem; color:#059669; font-weight:600;">✓ Will import</td>
+      </tr>`).join('');
+
+    const errorRows = errors.map((r) => `
+      <tr style="background:rgba(220,38,38,0.06);">
+        ${cell(r.rowNumber)}
+        ${cell(r.email)}
+        ${cell(r.title)}
+        ${cell(r.dateAttended)}
+        ${cell(r.evaluationCompleted ? 'yes' : 'no')}
+        <td style="padding:0.45rem 0.6rem; border-bottom:1px solid var(--border); font-size:0.82rem; color:#b91c1c;">✕ ${escapeHtml((r.issues || []).join('; '))}</td>
+      </tr>`).join('');
+
+    importPreviewTable.innerHTML = `<table style="width:100%; border-collapse:collapse;">${header}<tbody>${errorRows}${validRows}</tbody></table>`;
+    importPreviewWrap.style.display = 'block';
+    if (importCommitBtn) importCommitBtn.disabled = valid.length === 0;
+  };
+
+  const closeImportModal = () => {
+    if (importModal) importModal.style.display = 'none';
+    resetImportState();
+  };
+
+  if (importBtn && importModal) {
+    importBtn.addEventListener('click', () => {
+      resetImportState();
+      importModal.style.display = 'flex';
+    });
+  }
+  if (importClose) importClose.addEventListener('click', closeImportModal);
+  if (importCancelBtn) importCancelBtn.addEventListener('click', () => {
+    importPreviewWrap.style.display = 'none';
+    resetImportState();
+  });
+
+  if (importDownloadBtn) {
+    importDownloadBtn.addEventListener('click', async () => {
+      try {
+        if (importStatus) importStatus.textContent = 'Generating template…';
+        const res = await authedFetch('/api/admin/attendance-import/template.xlsx');
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data?.message || 'Failed to generate template.');
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `GIMS-Attendance-Import-Template-${new Date().toISOString().slice(0, 10)}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        if (importStatus) importStatus.textContent = 'Template downloaded.';
+      } catch (err) {
+        if (importStatus) importStatus.textContent = err.message || 'Failed to download template.';
+      }
+    });
+  }
+
+  if (importFileInput) {
+    importFileInput.addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      importSelectedFile = file;
+      if (importFileName) importFileName.textContent = file.name;
+      if (importStatus) importStatus.textContent = 'Parsing & validating…';
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await authedFetch('/api/admin/attendance-import/preview', {
+          method: 'POST',
+          body: formData,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || 'Failed to read file.');
+        importPreviewData = data;
+        renderImportPreview(data);
+        if (importStatus) importStatus.textContent = '';
+      } catch (err) {
+        importPreviewData = null;
+        if (importPreviewWrap) importPreviewWrap.style.display = 'none';
+        if (importStatus) importStatus.textContent = err.message || 'Failed to read file.';
+      }
+    });
+  }
+
+  const openConfirmPopup = () => {
+    if (!confirmModal || !importPreviewData) return;
+    const validCount = importPreviewData.validCount || 0;
+    const errorCount = importPreviewData.errorCount || 0;
+    const issueCerts = Boolean(importIssueCerts?.checked);
+
+    if (confirmText) {
+      confirmText.innerHTML =
+        `You are about to import <strong>${validCount}</strong> attendance record(s)` +
+        (errorCount ? ` (<strong>${errorCount}</strong> row${errorCount === 1 ? '' : 's'} with errors will be skipped)` : '') +
+        `.`;
+    }
+    if (confirmCertLine) {
+      confirmCertLine.innerHTML = issueCerts
+        ? '✓ <strong>Certificates will be issued</strong> for all imported attendees, following each seminar\'s release policy.'
+        : '⚠ <strong>Certificates will NOT be issued</strong> in this import. You can release them later from the seminar\'s participants modal.';
+      confirmCertLine.style.background = issueCerts ? 'rgba(16,185,129,0.08)' : 'rgba(245,158,11,0.08)';
+      confirmCertLine.style.borderColor = issueCerts ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.3)';
+    }
+    confirmModal.style.display = 'flex';
+  };
+
+  const closeConfirmPopup = () => {
+    if (confirmModal) confirmModal.style.display = 'none';
+  };
+
+  if (importCommitBtn) {
+    importCommitBtn.addEventListener('click', () => {
+      if (!importPreviewData || !importSelectedFile) return;
+      if ((importPreviewData.validCount || 0) === 0) {
+        if (importStatus) importStatus.textContent = 'No valid rows to import. Fix the errors and re-upload.';
+        return;
+      }
+      openConfirmPopup();
+    });
+  }
+
+  if (confirmCancel) confirmCancel.addEventListener('click', closeConfirmPopup);
+
+  if (confirmOk) {
+    confirmOk.addEventListener('click', async () => {
+      closeConfirmPopup();
+      if (!importSelectedFile) return;
+      try {
+        if (importStatus) importStatus.textContent = 'Importing…';
+        if (importCommitBtn) importCommitBtn.disabled = true;
+        const formData = new FormData();
+        formData.append('file', importSelectedFile);
+        formData.append('issueCertificates', importIssueCerts?.checked ? 'true' : 'false');
+        const res = await authedFetch('/api/admin/attendance-import/commit', {
+          method: 'POST',
+          body: formData,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || 'Import failed.');
+        const parts = [`Imported ${data.imported || 0} record(s).`];
+        if (data.skipped) parts.push(`${data.skipped} row(s) skipped due to errors.`);
+        if (data.certificatesIssued) parts.push(`${data.certificatesIssued} certificate(s) issued.`);
+        if (importStatus) importStatus.textContent = parts.join(' ');
+        if (importPreviewWrap) importPreviewWrap.style.display = 'none';
+        importSelectedFile = null;
+        importPreviewData = null;
+        if (importFileInput) importFileInput.value = '';
+        if (importFileName) importFileName.textContent = 'No file chosen';
+        // Refresh seminars carousel/employee list so updated counts show.
+        if (typeof loadAll === 'function') loadAll().catch(() => {});
+      } catch (err) {
+        if (importStatus) importStatus.textContent = err.message || 'Import failed.';
+      } finally {
+        if (importCommitBtn) importCommitBtn.disabled = false;
+      }
+    });
+  }
+
   loadAll().catch((err) => {
     console.error('[admin] loadAll failed', err);
     employeesStatusEl.textContent = err.message || 'Failed to load admin dashboard.';
