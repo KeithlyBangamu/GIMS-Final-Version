@@ -1763,20 +1763,67 @@ const IMPORT_HEADERS = [
   'Notes (optional)',
 ];
 
+// ExcelJS returns cell.value as different shapes depending on cell type:
+//   string -> 'foo'
+//   number -> 123
+//   date   -> Date instance
+//   hyperlink (e.g. auto-converted email) -> { text: 'foo', hyperlink: 'mailto:...' }
+//   formula -> { formula, result }
+//   rich text -> { richText: [{ text: '...' }, ...] }
+// Normalize all of these to a plain string.
+const cellToString = (value) => {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? '' : value.toISOString().slice(0, 10);
+  }
+  if (typeof value === 'object') {
+    if (Array.isArray(value.richText)) {
+      return value.richText.map((rt) => rt?.text || '').join('');
+    }
+    if (value.text !== undefined) return String(value.text);
+    if (value.hyperlink !== undefined) {
+      return String(value.hyperlink).replace(/^mailto:/i, '');
+    }
+    if (value.result !== undefined) return cellToString(value.result);
+    if (value.formula !== undefined) return '';
+    return '';
+  }
+  return String(value);
+};
+
 const parseYesNo = (value) => {
-  const s = String(value ?? '').trim().toLowerCase();
+  const s = cellToString(value).trim().toLowerCase();
   if (!s) return false;
   return ['yes', 'y', 'true', '1', 'completed', 'done'].includes(s);
+};
+
+// Excel date serial -> JS Date. Excel epoch is 1899-12-30 (accounts for the
+// 1900 leap-year bug). Values >= 60 use the same offset.
+const excelSerialToDate = (serial) => {
+  if (!Number.isFinite(serial)) return null;
+  const ms = Math.round(serial * 86400 * 1000);
+  const epoch = Date.UTC(1899, 11, 30);
+  const d = new Date(epoch + ms);
+  return Number.isNaN(d.getTime()) ? null : d;
 };
 
 const parseImportDate = (value) => {
   if (value === null || value === undefined || value === '') return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
-  const s = String(value).trim();
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (m) {
-    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  // Plain number = Excel date serial.
+  if (typeof value === 'number') return excelSerialToDate(value);
+  // Hyperlink/formula/etc — collapse via cellToString first.
+  const s = (typeof value === 'object' ? cellToString(value) : String(value)).trim();
+  if (!s) return null;
+  const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (ymd) {
+    const d = new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
     return Number.isNaN(d.getTime()) ? null : d;
+  }
+  // Numeric-string serial (e.g. "46158")
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const serial = Number(s);
+    if (serial > 59 && serial < 200000) return excelSerialToDate(serial);
   }
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d;
@@ -1801,20 +1848,35 @@ router.get('/attendance-import/template.xlsx', authMiddleware, async (req, res, 
 
     const ws = wb.addWorksheet('Attendance');
     ws.columns = [
-      { header: IMPORT_HEADERS[0], key: 'email', width: 32 },
-      { header: IMPORT_HEADERS[1], key: 'title', width: 40 },
-      { header: IMPORT_HEADERS[2], key: 'date', width: 22 },
-      { header: IMPORT_HEADERS[3], key: 'eval', width: 28 },
-      { header: IMPORT_HEADERS[4], key: 'notes', width: 30 },
+      { header: IMPORT_HEADERS[0], key: 'email', width: 36 },
+      { header: IMPORT_HEADERS[1], key: 'title', width: 44 },
+      { header: IMPORT_HEADERS[2], key: 'date', width: 28 },
+      { header: IMPORT_HEADERS[3], key: 'eval', width: 30 },
+      { header: IMPORT_HEADERS[4], key: 'notes', width: 32 },
     ];
-    ws.getRow(1).font = { bold: true };
-    ws.getRow(1).fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF1F3C77' },
-    };
-    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+
+    // Header row: dark blue background, white bold text, wrapped, taller row.
+    const headerRow = ws.getRow(1);
+    headerRow.height = 34;
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF1F3C77' },
+      };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.border = {
+        bottom: { style: 'thin', color: { argb: 'FF1F3C77' } },
+      };
+    });
     ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+    // Force the date column to TEXT format so Excel keeps "2026-04-15" as
+    // typed, instead of converting it to a serial number that displays
+    // as 4/15/2026 (and parses oddly on import).
+    ws.getColumn(3).numFmt = '@';
+    ws.getColumn(3).alignment = { horizontal: 'left' };
 
     // Sample/comment row (row 2) — grey + italic so fillers know to overwrite.
     const sample = ws.addRow({
@@ -1827,9 +1889,14 @@ router.get('/attendance-import/template.xlsx', authMiddleware, async (req, res, 
     sample.eachCell((cell) => {
       cell.font = { italic: true, color: { argb: 'FF888888' } };
     });
+    // Ensure the date cell in the sample row is text, too.
+    sample.getCell(3).numFmt = '@';
 
-    // Add a couple of blank rows ready to fill
-    for (let i = 0; i < 20; i += 1) ws.addRow({});
+    // Add blank rows ready to fill, with the date column pre-set to text.
+    for (let i = 0; i < 20; i += 1) {
+      const r = ws.addRow({});
+      r.getCell(3).numFmt = '@';
+    }
 
     // Reference sheet with valid emails and seminar titles
     const ref = wb.addWorksheet('Reference');
@@ -1879,11 +1946,11 @@ const parseImportWorkbook = async (buffer) => {
       row.eachCell((cell, col) => { seenHeader[col] = String(cell.value || '').trim(); });
       return;
     }
-    const email = String(row.getCell(1).value ?? '').trim().toLowerCase();
-    const title = String(row.getCell(2).value ?? '').trim();
+    const email = cellToString(row.getCell(1).value).trim().toLowerCase();
+    const title = cellToString(row.getCell(2).value).trim();
     const dateCell = row.getCell(3).value;
     const evalCell = row.getCell(4).value;
-    const notes = String(row.getCell(5).value ?? '').trim();
+    const notes = cellToString(row.getCell(5).value).trim();
 
     if (!email && !title && !dateCell) return;
 
