@@ -1,0 +1,27 @@
+# Render Blueprint for GIMS.
+# - Web service: existing GIMS Node.js app (already deployed).
+# - Cron job: daily MongoDB backup to Google Drive via rclone.
+#
+# To use this file: in Render dashboard → New + → Blueprint → connect this repo.
+# Render will create the cron job automatically. Set the env vars listed below
+# in the Render UI (they're marked sync: false so they're not stored in git).
+
+services:
+  - type: cron
+    name: gims-daily-backup
+    runtime: docker
+    dockerfilePath: ./scripts/backup.Dockerfile
+    schedule: "0 18 * * *"   # 02:00 PHT = 18:00 UTC, every day
+    envVars:
+      - key: MONGO_URI
+        sync: false   # set in Render UI — your Atlas connection string
+      - key: RCLONE_CONFIG_GDRIVE_TYPE
+        value: drive
+      - key: RCLONE_CONFIG_GDRIVE_SCOPE
+        value: drive
+      - key: RCLONE_CONFIG_GDRIVE_TOKEN
+        sync: false   # set in Render UI — the {"access_token":...} JSON blob
+      - key: DRIVE_FOLDER
+        value: GIMS-Backups
+      - key: RETENTION_DAYS
+        value: "30"
