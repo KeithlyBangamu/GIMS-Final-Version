@@ -3475,6 +3475,161 @@ document.addEventListener('DOMContentLoaded', () => {
   setTopbarFromToken();
   setDeletedSeminarsModalVisibility(false);
   showNavModule('dashboard');
+  // ============== Database Snapshot ==============
+  const snapshotRunBtn = document.getElementById('snapshot-run-btn');
+  const snapshotRestoreBtn = document.getElementById('snapshot-restore-btn');
+  const snapshotStatus = document.getElementById('snapshot-status');
+  const snapshotLastTime = document.getElementById('snapshot-last-time');
+  const snapshotLastMeta = document.getElementById('snapshot-last-meta');
+  const snapshotStatusBox = document.getElementById('snapshot-status-box');
+  const snapshotRestoreModal = document.getElementById('snapshot-restore-modal');
+  const snapshotRestoreMeta = document.getElementById('snapshot-restore-meta');
+  const snapshotRestorePhrase = document.getElementById('snapshot-restore-phrase');
+  const snapshotRestoreCancel = document.getElementById('snapshot-restore-cancel');
+  const snapshotRestoreConfirm = document.getElementById('snapshot-restore-confirm');
+  const snapshotRestoreStatus = document.getElementById('snapshot-restore-status');
+
+  const renderSnapshotStatus = (data) => {
+    if (!snapshotLastTime) return;
+    if (!data?.exists || !data?.snapshotAt) {
+      snapshotLastTime.textContent = 'No snapshot yet';
+      snapshotLastTime.style.color = '#b45309';
+      if (snapshotLastMeta) snapshotLastMeta.textContent = '';
+      if (snapshotStatusBox) snapshotStatusBox.style.background = 'rgba(245,158,11,0.10)';
+      return;
+    }
+    const when = new Date(data.snapshotAt);
+    const ageMs = Date.now() - when.getTime();
+    const ageHours = Math.floor(ageMs / (60 * 60 * 1000));
+    const ageStr = ageHours < 1 ? 'just now' : ageHours < 24 ? `${ageHours}h ago` : `${Math.floor(ageHours / 24)}d ago`;
+    snapshotLastTime.textContent = `${when.toLocaleString()} (${ageStr})`;
+    const isStale = ageHours >= 48;
+    snapshotLastTime.style.color = isStale ? '#b91c1c' : '#059669';
+    if (snapshotLastMeta) {
+      snapshotLastMeta.textContent = `• ${data.totalDocs || 0} docs across ${data.collections?.length || 0} collections${data.triggeredBy ? ` • by ${data.triggeredBy}` : ''}`;
+    }
+    if (snapshotStatusBox) {
+      snapshotStatusBox.style.background = isStale ? 'rgba(220,38,38,0.06)' : 'rgba(16,185,129,0.06)';
+    }
+  };
+
+  const refreshSnapshotStatus = async () => {
+    try {
+      const res = await authedFetch('/api/admin/maintenance/snapshot/status');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || 'Failed to load snapshot status.');
+      renderSnapshotStatus(data);
+      return data;
+    } catch (err) {
+      if (snapshotStatus) snapshotStatus.textContent = err.message || 'Failed to load snapshot status.';
+      return null;
+    }
+  };
+
+  if (snapshotRunBtn) {
+    snapshotRunBtn.addEventListener('click', async () => {
+      if (!confirm('Take a snapshot of the live database now? This may take a few seconds.')) return;
+      try {
+        snapshotRunBtn.disabled = true;
+        if (snapshotStatus) {
+          snapshotStatus.style.color = '';
+          snapshotStatus.textContent = 'Creating snapshot…';
+        }
+        const res = await authedFetch('/api/admin/maintenance/snapshot', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || 'Snapshot failed.');
+        if (snapshotStatus) {
+          snapshotStatus.style.color = '#059669';
+          snapshotStatus.textContent = `Snapshot saved: ${data.totalDocs} docs across ${data.collections?.length || 0} collections.`;
+        }
+        await refreshSnapshotStatus();
+      } catch (err) {
+        if (snapshotStatus) {
+          snapshotStatus.style.color = '#b91c1c';
+          snapshotStatus.textContent = err.message || 'Snapshot failed.';
+        }
+      } finally {
+        snapshotRunBtn.disabled = false;
+      }
+    });
+  }
+
+  const closeSnapshotRestoreModal = () => {
+    if (snapshotRestoreModal) snapshotRestoreModal.style.display = 'none';
+    if (snapshotRestorePhrase) snapshotRestorePhrase.value = '';
+    if (snapshotRestoreStatus) {
+      snapshotRestoreStatus.textContent = '';
+      snapshotRestoreStatus.style.color = '';
+    }
+  };
+
+  if (snapshotRestoreBtn) {
+    snapshotRestoreBtn.addEventListener('click', async () => {
+      const status = await refreshSnapshotStatus();
+      if (!status?.exists) {
+        if (snapshotStatus) {
+          snapshotStatus.style.color = '#b91c1c';
+          snapshotStatus.textContent = 'No snapshot exists yet. Run "Snapshot Now" first.';
+        }
+        return;
+      }
+      if (snapshotRestoreMeta) {
+        const when = status.snapshotAt ? new Date(status.snapshotAt).toLocaleString() : 'unknown';
+        snapshotRestoreMeta.textContent = `Snapshot to restore: ${when} • ${status.totalDocs || 0} docs across ${status.collections?.length || 0} collections.`;
+      }
+      if (snapshotRestoreModal) snapshotRestoreModal.style.display = 'flex';
+    });
+  }
+  if (snapshotRestoreCancel) snapshotRestoreCancel.addEventListener('click', closeSnapshotRestoreModal);
+  if (snapshotRestoreModal) {
+    snapshotRestoreModal.addEventListener('click', (event) => {
+      if (event.target === snapshotRestoreModal) closeSnapshotRestoreModal();
+    });
+  }
+
+  if (snapshotRestoreConfirm) {
+    snapshotRestoreConfirm.addEventListener('click', async () => {
+      const phrase = (snapshotRestorePhrase?.value || '').trim();
+      if (phrase !== 'GIMS RESTORE') {
+        if (snapshotRestoreStatus) {
+          snapshotRestoreStatus.style.color = '#b91c1c';
+          snapshotRestoreStatus.textContent = 'Type the confirmation phrase exactly.';
+        }
+        return;
+      }
+      try {
+        snapshotRestoreConfirm.disabled = true;
+        if (snapshotRestoreStatus) {
+          snapshotRestoreStatus.style.color = '';
+          snapshotRestoreStatus.textContent = 'Restoring from snapshot…';
+        }
+        const res = await authedFetch('/api/admin/maintenance/snapshot/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phrase }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || 'Restore failed.');
+        if (snapshotRestoreStatus) {
+          snapshotRestoreStatus.style.color = '#059669';
+          snapshotRestoreStatus.textContent = `Restored ${data.totalDocs} docs across ${data.collections?.length || 0} collections.`;
+        }
+        // Reload the page so cached UI matches the restored DB.
+        setTimeout(() => window.location.reload(), 1200);
+      } catch (err) {
+        if (snapshotRestoreStatus) {
+          snapshotRestoreStatus.style.color = '#b91c1c';
+          snapshotRestoreStatus.textContent = err.message || 'Restore failed.';
+        }
+      } finally {
+        snapshotRestoreConfirm.disabled = false;
+      }
+    });
+  }
+
+  // Load initial snapshot status when the maintenance section is opened.
+  refreshSnapshotStatus().catch(() => {});
+
   // ============== Record Past Seminar ==============
   const pastSeminarBtn = document.getElementById('admin-record-past-seminar-btn');
   const pastSeminarModal = document.getElementById('admin-record-past-seminar-modal');

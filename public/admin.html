@@ -751,6 +751,29 @@
               </div>
 
               <div class="card" style="margin-top:1.25rem;">
+                <h2 style="margin-top:0;">Database Snapshot (Backup)</h2>
+                <p class="muted">
+                  A full copy of the GIMS database, kept inside Atlas as <code>gims-backup</code>.
+                  Runs automatically every day at 02:00 (Manila time). Use these buttons to take a snapshot now,
+                  or to restore the live database from the most recent snapshot.
+                </p>
+
+                <div id="snapshot-status-box" style="margin-top:0.75rem; padding:0.85rem 1rem; border-radius:0.6rem; border:1px solid var(--border); background:rgba(32,58,115,0.04);">
+                  <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+                    <strong>Last snapshot:</strong>
+                    <span id="snapshot-last-time">—</span>
+                    <span class="muted small" id="snapshot-last-meta"></span>
+                  </div>
+                </div>
+
+                <div style="display:flex; gap:0.6rem; flex-wrap:wrap; margin-top:0.9rem;">
+                  <button class="btn" id="snapshot-run-btn" type="button">Snapshot Now</button>
+                  <button class="btn secondary" id="snapshot-restore-btn" type="button" style="border-color:#dc2626; color:#b91c1c;">Restore from Snapshot</button>
+                </div>
+                <p class="status" id="snapshot-status" style="margin-top:0.6rem;"></p>
+              </div>
+
+              <div class="card" style="margin-top:1.25rem;">
                 <h2 style="margin-top:0;">Archived School Years</h2>
                 <p class="muted">Past school years that have been reset. Click one to view the seminars and employees archived that year, or re-download the masterlist CSV.</p>
                 <div id="maintenance-archives-list" style="margin-top:0.75rem;"></div>
@@ -1217,6 +1240,30 @@
           <div id="admin-seminar-evaluations-summary" style="margin: 0.8rem 0 1rem;"></div>
           <div id="admin-seminar-evaluations-list" style="max-height: 60vh; overflow-y: auto;"></div>
           <p class="status" id="admin-seminar-evaluations-status"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Snapshot Restore Confirm Modal -->
+    <div class="modal-backdrop" id="snapshot-restore-modal" role="dialog" aria-modal="true" style="display:none;">
+      <div class="modal" style="width: min(540px, 100%);">
+        <div class="modal-header">
+          <h3 style="margin:0; color:#b91c1c;">Restore Database from Snapshot</h3>
+        </div>
+        <div class="modal-content">
+          <p style="margin-top:0;">
+            This will <strong>replace all current live data</strong> with the contents of the most recent snapshot. Anything created since the snapshot was taken will be lost.
+          </p>
+          <p id="snapshot-restore-meta" class="muted small" style="margin:0.5rem 0;"></p>
+          <label style="display:block; margin-top:0.75rem;">
+            Type <code>GIMS RESTORE</code> exactly to confirm:
+            <input type="text" id="snapshot-restore-phrase" placeholder="GIMS RESTORE" autocomplete="off" />
+          </label>
+          <div style="display:flex; gap:0.6rem; justify-content:flex-end; margin-top:1rem;">
+            <button class="btn secondary" id="snapshot-restore-cancel" type="button">Cancel</button>
+            <button class="btn" id="snapshot-restore-confirm" type="button" style="background:#dc2626; border-color:#dc2626;">Restore Now</button>
+          </div>
+          <p class="status" id="snapshot-restore-status" style="margin-top:0.75rem;"></p>
         </div>
       </div>
     </div>

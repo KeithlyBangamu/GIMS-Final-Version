@@ -15,6 +15,12 @@ import {
   currentSchoolYear,
   isValidSchoolYear,
 } from '../services/schoolYearService.js';
+import {
+  runSnapshot,
+  restoreFromSnapshot,
+  getSnapshotStatus,
+  BACKUP_DATABASE_NAME,
+} from '../services/backupDatabaseService.js';
 
 const router = express.Router();
 
@@ -33,6 +39,7 @@ const authMiddleware = (req, res, next) => {
 };
 
 const RESET_PHRASE = 'GIMS MAINTENANCE';
+const RESTORE_PHRASE = 'GIMS RESTORE';
 
 const displayValue = (value) => {
   if (value === null || value === undefined) return 'None';
@@ -890,6 +897,102 @@ router.post('/seminars/past', authMiddleware, async (req, res, next) => {
     res.status(201).json({
       message: 'Past seminar created. You can now import attendance for it.',
       seminar,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============== Database Snapshot (in-Atlas backup) ==============
+
+router.get('/snapshot/status', authMiddleware, async (req, res, next) => {
+  try {
+    const status = await getSnapshotStatus();
+    res.json({
+      backupDatabase: BACKUP_DATABASE_NAME,
+      ...status,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/snapshot', authMiddleware, async (req, res, next) => {
+  try {
+    const result = await runSnapshot({ triggeredBy: req.user?.email || 'admin' });
+
+    try {
+      await MaintenanceLog.create({
+        action: 'snapshot-create',
+        schoolYear: currentSchoolYear() || 'unknown',
+        triggeredBy: req.user?.id,
+        triggeredByEmail: req.user?.email,
+        counts: {
+          registrationsArchived: 0,
+          seminarsArchived: 0,
+          employeesAffected: 0,
+          registrationsRestored: result.totalDocs,
+          seminarsRestored: result.collections.length,
+        },
+        notes: `Manual snapshot: ${result.totalDocs} docs across ${result.collections.length} collections.`,
+      });
+    } catch (logErr) {
+      console.error('[snapshot] failed to write maintenance log:', logErr.message);
+    }
+
+    res.json({
+      message: 'Snapshot created.',
+      totalDocs: result.totalDocs,
+      collections: result.collections,
+      snapshotAt: result.finishedAt,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/snapshot/restore', authMiddleware, async (req, res, next) => {
+  try {
+    const phrase = String(req.body?.phrase || '').trim();
+    if (phrase !== RESTORE_PHRASE) {
+      return res.status(400).json({
+        message: `To restore, type exactly: ${RESTORE_PHRASE}`,
+      });
+    }
+
+    const status = await getSnapshotStatus();
+    if (!status?.exists) {
+      return res.status(400).json({
+        message: 'No snapshot exists yet. Run "Snapshot Now" first.',
+      });
+    }
+
+    const result = await restoreFromSnapshot({ triggeredBy: req.user?.email || 'admin' });
+
+    try {
+      await MaintenanceLog.create({
+        action: 'snapshot-restore',
+        schoolYear: currentSchoolYear() || 'unknown',
+        triggeredBy: req.user?.id,
+        triggeredByEmail: req.user?.email,
+        counts: {
+          registrationsArchived: 0,
+          seminarsArchived: 0,
+          employeesAffected: 0,
+          registrationsRestored: result.totalDocs,
+          seminarsRestored: result.collections.length,
+        },
+        notes: `Restored from snapshot taken ${status.snapshotAt ? new Date(status.snapshotAt).toISOString() : 'unknown'}. ${result.totalDocs} docs across ${result.collections.length} collections.`,
+      });
+    } catch (logErr) {
+      console.error('[snapshot] failed to write restore maintenance log:', logErr.message);
+    }
+
+    res.json({
+      message: 'Database restored from snapshot.',
+      totalDocs: result.totalDocs,
+      collections: result.collections,
+      restoredFrom: status.snapshotAt,
     });
   } catch (err) {
     next(err);
