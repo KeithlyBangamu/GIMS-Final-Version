@@ -50,8 +50,13 @@ export const startDriveBackupScheduler = () => {
     console.log('[drive-backup] disabled via DRIVE_BACKUP_ENABLED=false');
     return;
   }
-  if (!process.env.DRIVE_BACKUP_FOLDER_ID) {
-    console.log('[drive-backup] DRIVE_BACKUP_FOLDER_ID not set — scheduler not started');
+  if (
+    !process.env.DRIVE_BACKUP_FOLDER_ID ||
+    !process.env.GOOGLE_OAUTH_CLIENT_ID ||
+    !process.env.GOOGLE_OAUTH_CLIENT_SECRET ||
+    !process.env.GOOGLE_OAUTH_REFRESH_TOKEN
+  ) {
+    console.log('[drive-backup] OAuth env vars or folder id missing — scheduler not started');
     return;
   }
 

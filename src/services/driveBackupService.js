@@ -1,17 +1,21 @@
 // Google Drive backup uploader.
 //
 // Generates a full-database CSV (same format as the /weekly-export.csv route)
-// and uploads it to a configured Drive folder using a service-account key.
+// and uploads it to a configured Drive folder using OAuth user credentials.
+// Service accounts can't upload to personal Drive (no storage quota), so this
+// uses a long-lived refresh token belonging to a real Google user.
 //
 // Required env:
-//   GOOGLE_SERVICE_ACCOUNT_KEY_PATH  absolute or project-relative path to JSON key
-//   DRIVE_BACKUP_FOLDER_ID           Drive folder ID (must be shared with the
-//                                    service-account email as Editor)
+//   GOOGLE_OAUTH_CLIENT_ID
+//   GOOGLE_OAUTH_CLIENT_SECRET
+//   GOOGLE_OAUTH_REFRESH_TOKEN
+//   DRIVE_BACKUP_FOLDER_ID           Drive folder ID (must be writable by
+//                                    the user that authorized the token)
 // Optional env:
 //   DRIVE_BACKUP_RETENTION_DAYS      delete backups older than N days (default 30)
+//
+// To obtain the refresh token, run: node src/scripts/getDriveRefreshToken.js
 
-import fs from 'fs';
-import path from 'path';
 import { google } from 'googleapis';
 import { Readable } from 'stream';
 import mongoose from 'mongoose';
@@ -67,25 +71,22 @@ export const buildFullBackupCsv = async () => {
   return { csv: body, collectionCount: names.length };
 };
 
-const resolveKeyPath = () => {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || 'gims-drive-key.json';
-  return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
-};
-
 let driveClientPromise = null;
 const getDriveClient = () => {
   if (driveClientPromise) return driveClientPromise;
   driveClientPromise = (async () => {
-    const keyPath = resolveKeyPath();
-    if (!fs.existsSync(keyPath)) {
-      throw new Error(`Drive key file not found at ${keyPath}`);
+    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+    const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
+    if (!clientId || !clientSecret || !refreshToken) {
+      throw new Error(
+        'Missing Drive OAuth env vars: GOOGLE_OAUTH_CLIENT_ID, ' +
+        'GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_OAUTH_REFRESH_TOKEN are required.'
+      );
     }
-    const auth = new google.auth.GoogleAuth({
-      keyFile: keyPath,
-      scopes: ['https://www.googleapis.com/auth/drive.file'],
-    });
-    const authClient = await auth.getClient();
-    return google.drive({ version: 'v3', auth: authClient });
+    const oauth2 = new google.auth.OAuth2(clientId, clientSecret);
+    oauth2.setCredentials({ refresh_token: refreshToken });
+    return google.drive({ version: 'v3', auth: oauth2 });
   })().catch((err) => {
     driveClientPromise = null;
     throw err;
