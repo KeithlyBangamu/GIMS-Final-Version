@@ -72,6 +72,10 @@ export const runReminderTick = async () => {
       skipped += 1;
       continue;
     }
+    if (employee.accountStatus === 'deactivated') {
+      skipped += 1;
+      continue;
+    }
 
     const target = resolveTargetSession(seminar, reg);
     if (!target.date) {

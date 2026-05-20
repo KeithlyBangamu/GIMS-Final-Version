@@ -104,6 +104,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const seminarParticipantsListEl = document.getElementById('admin-seminar-participants-list');
   const seminarParticipantsStatusEl = document.getElementById('admin-seminar-participants-status');
   const seminarHeldBtn = document.getElementById('admin-seminar-held-btn');
+  const seminarEvalsModalEl = document.getElementById('admin-seminar-evaluations-modal');
+  const seminarEvalsCloseBtn = document.getElementById('admin-seminar-evaluations-close');
+  const seminarEvalsMetaEl = document.getElementById('admin-seminar-evaluations-meta');
+  const seminarEvalsSummaryEl = document.getElementById('admin-seminar-evaluations-summary');
+  const seminarEvalsListEl = document.getElementById('admin-seminar-evaluations-list');
+  const seminarEvalsStatusEl = document.getElementById('admin-seminar-evaluations-status');
   const markAttendanceBtn = document.getElementById('admin-mark-attendance-btn');
   const sendCertificatesBtn = document.getElementById('admin-send-certificates-btn');
   const attendanceSelectAllEl = document.getElementById('admin-attendance-select-all');
@@ -363,6 +369,36 @@ document.addEventListener('DOMContentLoaded', () => {
     const period = hours >= 12 ? 'PM' : 'AM';
     hours = hours % 12 || 12;
     return `${hours}:${minutes}\u00A0${period}`;
+  };
+
+  /**
+   * Returns the latest end-time (Date) for a seminar, or null if it cannot be
+   * determined. For multi-session seminars this is the end of the last session;
+   * for single-day seminars it's date + startTime + durationHours.
+   */
+  const getSeminarEndTime = (seminar) => {
+    if (!seminar) return null;
+    const sessions = Array.isArray(seminar.sessions) && seminar.sessions.length > 0
+      ? seminar.sessions
+      : [{ date: seminar.date, startTime: seminar.startTime, durationHours: seminar.durationHours }];
+    let earliest = null;
+    for (const sess of sessions) {
+      if (!sess?.date) continue;
+      const d = new Date(sess.date);
+      if (Number.isNaN(d.getTime())) continue;
+      const m = /^(\d{1,2}):(\d{2})$/.exec(String(sess.startTime || '').trim());
+      if (m) {
+        d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+      }
+      if (!earliest || d.getTime() < earliest.getTime()) earliest = d;
+    }
+    return earliest;
+  };
+
+  const hasSeminarTimeElapsed = (seminar) => {
+    const start = getSeminarEndTime(seminar);
+    if (!start) return true; // unknown — don't block
+    return Date.now() >= start.getTime();
   };
 
   /** Multi-day seminar: list each session date & time (Manage Seminars cards). */
@@ -1265,51 +1301,47 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     profileCertificatesListEl.innerHTML = certificates
-      .map((cert) => {
+      .map((cert, idx) => {
         const datePart = cert?.date ? formatDate(cert.date) : 'No date';
-        const issuedPart = cert?.certificateIssuedAt ? formatDate(cert.certificateIssuedAt) : 'Not issued';
+        const timePart = cert?.startTime ? formatTime(cert.startTime) : '';
+        const issuedAt = cert?.certificateIssuedAt ? new Date(cert.certificateIssuedAt) : null;
+        const issuedStr = issuedAt && !Number.isNaN(issuedAt.getTime()) ? issuedAt.toLocaleString() : 'Not issued';
+        const code = cert?.certificateCode || 'Pending';
+        const evalDone = cert?.evaluationCompleted ? 'Completed' : (cert?.evaluationAvailable ? 'Pending' : 'Not required');
+        const detailsId = `admin-cert-details-${idx}`;
         return `
           <div style="padding: 0.45rem 0.55rem; border:1px solid var(--border); border-radius:0.55rem; background:#fff;">
             <div style="display:flex; justify-content:space-between; gap:0.6rem; align-items:center; flex-wrap:wrap;">
               <div>
                 <div style="font-weight:600; color:var(--xu-blue);">${escapeHtml(cert?.title || 'Untitled seminar')}</div>
-                <div class="muted small" style="margin-top:0.12rem;">${escapeHtml(datePart)} • Code: ${escapeHtml(cert?.certificateCode || 'Pending')}</div>
+                <div class="muted small" style="margin-top:0.12rem;">${escapeHtml(datePart)} • Code: ${escapeHtml(code)}</div>
               </div>
-              <button class="btn secondary" type="button" data-admin-cert-download="${escapeHtml(cert?.registrationId || '')}" style="padding:0.35rem 0.65rem;">Download</button>
+              <button class="btn secondary" type="button" data-admin-cert-details="${escapeHtml(detailsId)}" aria-expanded="false" aria-controls="${escapeHtml(detailsId)}" style="padding:0.35rem 0.65rem;">View Details</button>
             </div>
-            <div class="muted small" style="margin-top:0.15rem;">Issued: ${escapeHtml(issuedPart)}</div>
+            <div class="muted small" style="margin-top:0.15rem;">Issued: ${escapeHtml(issuedStr)}</div>
+            <div id="${escapeHtml(detailsId)}" data-admin-cert-details-panel style="display:none; margin-top:0.55rem; padding-top:0.55rem; border-top:1px dashed var(--border);">
+              <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:0.35rem 0.9rem; font-size:0.88rem;">
+                <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Certificate Code</span><span style="font-family:ui-monospace, SFMono-Regular, Menlo, monospace;">${escapeHtml(code)}</span></div>
+                <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Issued At</span>${escapeHtml(issuedStr)}</div>
+                <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Seminar</span>${escapeHtml(cert?.title || 'Untitled seminar')}</div>
+                <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Seminar Date</span>${escapeHtml(datePart)}${timePart ? ` • ${escapeHtml(timePart)}` : ''}</div>
+                <div><span class="muted small" style="display:block; font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Evaluation</span>${escapeHtml(evalDone)}</div>
+              </div>
+            </div>
           </div>
         `;
       })
       .join('');
 
-    profileCertificatesListEl.querySelectorAll('[data-admin-cert-download]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const registrationId = button.getAttribute('data-admin-cert-download');
-        if (!registrationId || !employeeId) return;
-        try {
-          const res = await authedFetch(`/api/admin/employees/${employeeId}/certificates/${registrationId}/download`);
-          if (!res.ok) {
-            const text = await res.text();
-            throw new Error(text || 'Certificate download failed.');
-          }
-
-          const blob = await res.blob();
-          const disposition = res.headers.get('content-disposition') || '';
-          const match = /filename="?([^";]+)"?/i.exec(disposition);
-          const name = match?.[1] || `GIMS-Certificate-${registrationId}.png`;
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = name;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-        } catch (err) {
-          console.error('[admin] certificate download failed', err);
-          if (profileModalStatusEl) profileModalStatusEl.textContent = err.message || 'Certificate download failed.';
-        }
+    profileCertificatesListEl.querySelectorAll('[data-admin-cert-details]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const targetId = button.getAttribute('data-admin-cert-details');
+        const panel = targetId ? document.getElementById(targetId) : null;
+        if (!panel) return;
+        const open = panel.style.display !== 'none';
+        panel.style.display = open ? 'none' : 'block';
+        button.setAttribute('aria-expanded', open ? 'false' : 'true');
+        button.textContent = open ? 'View Details' : 'Hide Details';
       });
     });
   };
@@ -1508,6 +1540,172 @@ document.addEventListener('DOMContentLoaded', () => {
       seminarReportChartInstance = null;
     }
     if (seminarReportContentEl) seminarReportContentEl.innerHTML = '<p class="muted">Loading report…</p>';
+  };
+
+  const closeEvaluationsModal = () => {
+    if (seminarEvalsModalEl) seminarEvalsModalEl.style.display = 'none';
+  };
+  if (seminarEvalsCloseBtn) seminarEvalsCloseBtn.addEventListener('click', closeEvaluationsModal);
+  if (seminarEvalsModalEl) {
+    seminarEvalsModalEl.addEventListener('click', (e) => {
+      if (e.target === seminarEvalsModalEl) closeEvaluationsModal();
+    });
+  }
+
+  const renderRatingChips = (ratings) => {
+    if (!ratings || typeof ratings !== 'object') return '';
+    const labels = {
+      overall: 'Overall',
+      relevance: 'Relevance',
+      facilitator: 'Facilitator',
+      organization: 'Organization',
+      interaction: 'Interaction',
+      food: 'Food',
+      venue: 'Venue',
+      understanding: 'Understanding',
+      applyLikelihood: 'Will Apply',
+    };
+    const chips = Object.entries(labels)
+      .filter(([key]) => ratings[key] != null)
+      .map(([key, label]) => `
+        <span style="display:inline-flex; align-items:center; gap:0.35rem; background:#eef3ff; color:#1f3c77; border:1px solid #c9d8f3; border-radius:999px; padding:0.18rem 0.6rem; font-size:0.78rem; font-weight:600;">
+          ${escapeHtml(label)}: ${Number(ratings[key]).toFixed(1)}/5
+        </span>`)
+      .join(' ');
+    return chips
+      ? `<div style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-top:0.4rem;">${chips}</div>`
+      : '';
+  };
+
+  const renderEvalText = (label, value) => {
+    if (!value || !String(value).trim()) return '';
+    return `
+      <div style="margin-top:0.55rem;">
+        <div class="muted small" style="font-size:0.75rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">${escapeHtml(label)}</div>
+        <div style="margin-top:0.18rem; font-size:0.92rem; line-height:1.5; white-space:pre-wrap;">${escapeHtml(value)}</div>
+      </div>`;
+  };
+
+  const computeEvalSummary = (evaluations) => {
+    if (!Array.isArray(evaluations) || evaluations.length === 0) return null;
+    const keys = ['overall', 'relevance', 'facilitator', 'organization', 'interaction', 'food', 'venue', 'understanding', 'applyLikelihood'];
+    const labels = {
+      overall: 'Overall',
+      relevance: 'Relevance',
+      facilitator: 'Facilitator',
+      organization: 'Organization',
+      interaction: 'Interaction',
+      food: 'Food',
+      venue: 'Venue',
+      understanding: 'Understanding',
+      applyLikelihood: 'Will Apply',
+    };
+    const sums = {};
+    const counts = {};
+    keys.forEach((k) => { sums[k] = 0; counts[k] = 0; });
+    evaluations.forEach((ev) => {
+      const r = ev?.ratings || {};
+      keys.forEach((k) => {
+        if (r[k] != null && Number.isFinite(Number(r[k]))) {
+          sums[k] += Number(r[k]);
+          counts[k] += 1;
+        }
+      });
+    });
+    return keys
+      .filter((k) => counts[k] > 0)
+      .map((k) => ({ key: k, label: labels[k], avg: sums[k] / counts[k], count: counts[k] }));
+  };
+
+  const renderEvalSummary = (evaluations) => {
+    const stats = computeEvalSummary(evaluations);
+    if (!stats || stats.length === 0) {
+      if (seminarEvalsSummaryEl) seminarEvalsSummaryEl.innerHTML = '';
+      return;
+    }
+    const cards = stats
+      .map((s) => `
+        <div style="border:1px solid var(--border); border-radius:8px; padding:0.55rem 0.75rem; background:#fff; min-width:120px;">
+          <div class="muted small" style="font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">${escapeHtml(s.label)}</div>
+          <div style="font-size:1.25rem; font-weight:700; color:var(--xu-blue); margin-top:0.15rem;">${s.avg.toFixed(2)}<span style="font-size:0.85rem; color:#64748b; font-weight:500;">/5</span></div>
+          <div class="muted small" style="font-size:0.72rem;">${s.count} response${s.count === 1 ? '' : 's'}</div>
+        </div>`)
+      .join('');
+    if (seminarEvalsSummaryEl) {
+      seminarEvalsSummaryEl.innerHTML = `
+        <div class="muted small" style="font-weight:700; color:#0f172a; margin-bottom:0.4rem;">Rating averages</div>
+        <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">${cards}</div>`;
+    }
+  };
+
+  const openEvaluationsModal = async (seminar) => {
+    if (!seminarEvalsModalEl) return;
+    if (seminarEvalsMetaEl) {
+      seminarEvalsMetaEl.textContent = `${seminar.title || 'Seminar'} • ${formatDate(seminar.date)}`;
+    }
+    if (seminarEvalsSummaryEl) seminarEvalsSummaryEl.innerHTML = '';
+    if (seminarEvalsListEl) seminarEvalsListEl.innerHTML = '<p class="muted">Loading evaluations…</p>';
+    if (seminarEvalsStatusEl) seminarEvalsStatusEl.textContent = '';
+    seminarEvalsModalEl.style.display = 'flex';
+
+    try {
+      const res = await authedFetch(`/api/admin/seminars/${seminar._id}/evaluations`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || 'Failed to load evaluations.');
+      const evaluations = Array.isArray(data) ? data : [];
+      if (evaluations.length === 0) {
+        if (seminarEvalsListEl) seminarEvalsListEl.innerHTML = '<p class="muted">No evaluations submitted yet for this seminar.</p>';
+        return;
+      }
+
+      renderEvalSummary(evaluations);
+
+      if (seminarEvalsListEl) {
+        seminarEvalsListEl.innerHTML = evaluations
+          .map((ev) => {
+            const employee = ev?.employeeID || {};
+            const employeeName = ev?.consent === false
+              ? 'Anonymous (no consent given)'
+              : (employee?.name || 'Unknown employee');
+            const department = ev?.consent === false ? '' : (employee?.department || '');
+            const submitted = ev?.submittedAt ? new Date(ev.submittedAt).toLocaleString() : '';
+            const lessons = Array.isArray(ev?.responses?.lessons) ? ev.responses.lessons : [];
+            const lessonsBlock = lessons.length > 0
+              ? `<div style="margin-top:0.55rem;">
+                  <div class="muted small" style="font-size:0.75rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:#475569;">Lessons</div>
+                  ${lessons.map((l) => `
+                    <div style="margin-top:0.25rem; font-size:0.9rem;">
+                      <span style="font-weight:600; color:var(--xu-blue);">${escapeHtml(l?.referenceLabel || l?.referenceShortName || 'Reference')}:</span>
+                      <span style="white-space:pre-wrap;">${escapeHtml(l?.answer || '')}</span>
+                    </div>`).join('')}
+                </div>`
+              : '';
+
+            return `
+              <article class="card" style="box-shadow:none; padding:0.85rem 1rem; margin-bottom:0.7rem;">
+                <div style="display:flex; justify-content:space-between; gap:0.6rem; flex-wrap:wrap; align-items:flex-start;">
+                  <div>
+                    <div style="font-weight:700; color:#0f172a;">${escapeHtml(employeeName)}</div>
+                    ${department ? `<div class="muted small">${escapeHtml(department)}</div>` : ''}
+                  </div>
+                  <div class="muted small" style="text-align:right;">${escapeHtml(submitted)}</div>
+                </div>
+                ${renderRatingChips(ev?.ratings)}
+                ${renderEvalText('Relevance Context', ev?.responses?.relevanceContext)}
+                ${lessonsBlock}
+                ${renderEvalText('Stop Doing', ev?.responses?.stop)}
+                ${renderEvalText('Start Doing', ev?.responses?.start)}
+                ${renderEvalText('Continue Doing', ev?.responses?.continueDoing)}
+                ${renderEvalText('Improvements', ev?.responses?.improvements)}
+              </article>`;
+          })
+          .join('');
+      }
+    } catch (err) {
+      console.error('[admin] load evaluations failed', err);
+      if (seminarEvalsListEl) seminarEvalsListEl.innerHTML = '';
+      if (seminarEvalsStatusEl) seminarEvalsStatusEl.textContent = err.message || 'Failed to load evaluations.';
+    }
   };
 
   const buildEvalRefsRepeater = (mode) => {
@@ -1753,8 +1951,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Update attendance buttons
       if (seminarHeldBtn) {
-        seminarHeldBtn.disabled = false;
+        const elapsed = hasSeminarTimeElapsed(seminar);
+        const blocked = !isHeld && !elapsed;
+        seminarHeldBtn.disabled = blocked;
         seminarHeldBtn.textContent = isHeld ? 'Unmark Held' : 'Mark as Held';
+        seminarHeldBtn.title = blocked
+          ? `Available after the seminar start time (${formatDate(getSeminarEndTime(seminar))}).`
+          : '';
       }
       if (markAttendanceBtn) markAttendanceBtn.disabled = !isHeld;
       if (sendCertificatesBtn) sendCertificatesBtn.disabled = !isHeld || !attendanceModalState.attendanceSaved;
@@ -1825,7 +2028,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             <div style="${actionGroupStyle}">
               <button class="btn secondary" type="button" data-seminar-view="${seminar._id}" style="${wideButtonStyle}">View Participants</button>
-              <button class="btn secondary" type="button" data-seminar-held="${seminar._id}" style="${wideButtonStyle}">${seminar.isHeld ? 'Unmark Held' : 'Mark as Held'}</button>
+              ${(() => {
+                const elapsed = hasSeminarTimeElapsed(seminar);
+                const disable = !seminar.isHeld && !elapsed;
+                const title = disable
+                  ? `Available after the seminar start time (${formatDate(getSeminarEndTime(seminar))}).`
+                  : '';
+                return `<button class="btn secondary" type="button" data-seminar-held="${seminar._id}" style="${wideButtonStyle}" ${disable ? 'disabled aria-disabled="true"' : ''} title="${escapeHtml(title)}">${seminar.isHeld ? 'Unmark Held' : 'Mark as Held'}</button>`;
+              })()}
+              <button class="btn secondary" type="button" data-seminar-evals="${seminar._id}" style="${wideButtonStyle}">Evaluations</button>
               <button class="btn" type="button" data-seminar-edit="${seminar._id}" style="${shortButtonStyle}">Edit</button>
               <button class="btn secondary" type="button" data-seminar-delete="${seminar._id}" style="${shortButtonStyle}">Delete</button>
             </div>
@@ -1850,10 +2061,25 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
+    seminarsCarouselEl.querySelectorAll('[data-seminar-evals]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const seminar = currentSeminars.find((item) => String(item._id) === String(button.getAttribute('data-seminar-evals')));
+        if (!seminar) return;
+        await openEvaluationsModal(seminar);
+      });
+    });
+
     seminarsCarouselEl.querySelectorAll('[data-seminar-held]').forEach((button) => {
       button.addEventListener('click', async () => {
         const seminar = currentSeminars.find((item) => String(item._id) === String(button.getAttribute('data-seminar-held')));
         if (!seminar) return;
+        if (!seminar.isHeld && !hasSeminarTimeElapsed(seminar)) {
+          if (seminarsStatusEl) {
+            const end = getSeminarEndTime(seminar);
+            seminarsStatusEl.textContent = `Cannot mark as held yet — seminar starts ${formatDate(end)}.`;
+          }
+          return;
+        }
         try {
           const targetHeld = !seminar.isHeld;
           const res = await authedFetch(`/api/admin/seminars/${seminar._id}/held`, {
@@ -2530,6 +2756,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   seminarHeldBtn?.addEventListener('click', async () => {
     if (!attendanceModalState.seminarId) return;
+    const seminar = currentSeminars.find((item) => String(item._id) === String(attendanceModalState.seminarId));
+    if (seminar && !seminar.isHeld && !hasSeminarTimeElapsed(seminar)) {
+      if (seminarParticipantsStatusEl) {
+        const end = getSeminarEndTime(seminar);
+        seminarParticipantsStatusEl.textContent = `Cannot mark as held yet — seminar starts ${formatDate(end)}.`;
+      }
+      return;
+    }
     try {
       const targetHeld = !attendanceModalState.isHeld;
       const res = await authedFetch(`/api/admin/seminars/${attendanceModalState.seminarId}/held`, {
@@ -3109,6 +3343,40 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     };
 
+    const buildEmployeesHtml = (employees) => {
+      if (!employees.length) {
+        return '<p class="muted" style="margin: 0.4rem 0;">No employees match that search.</p>';
+      }
+      return employees.map((e) => `
+        <details style="margin-bottom:0.4rem;">
+          <summary><strong>${escapeHtml(e.employee.name || '(unknown)')}</strong> <span class="muted">— ${escapeHtml(e.employee.department || '')}, ${e.registrations.length} record(s)</span></summary>
+          <ul style="margin:0.4rem 0 0.4rem 1.2rem;">
+            ${e.registrations.map((r) => `
+              <li>${escapeHtml(r.seminar.title || '(seminar)')} — ${escapeHtml(r.status || '')}${r.certificateIssued ? ` ✓ cert ${escapeHtml(r.certificateCode || '')}` : ''}</li>
+            `).join('')}
+          </ul>
+        </details>
+      `).join('');
+    };
+
+    const filterArchiveEmployees = (employees, query) => {
+      const q = String(query || '').trim().toLowerCase();
+      if (!q) return employees;
+      return employees.filter((e) => {
+        const name = String(e.employee?.name || '').toLowerCase();
+        const dept = String(e.employee?.department || '').toLowerCase();
+        const email = String(e.employee?.email || '').toLowerCase();
+        const position = String(e.employee?.position || '').toLowerCase();
+        if (name.includes(q) || dept.includes(q) || email.includes(q) || position.includes(q)) {
+          return true;
+        }
+        // Also match against seminar titles in their records.
+        return e.registrations.some((r) =>
+          String(r.seminar?.title || '').toLowerCase().includes(q)
+        );
+      });
+    };
+
     const viewArchive = async (sy) => {
       archiveDetail.innerHTML = `<p class="muted">Loading ${escapeHtml(sy)}…</p>`;
       try {
@@ -3118,26 +3386,52 @@ document.addEventListener('DOMContentLoaded', () => {
         const seminarsHtml = (data.seminars || []).map((s) => `
           <li><strong>${escapeHtml(s.title)}</strong> <span class="muted">— ${s.date ? new Date(s.date).toLocaleDateString() : ''}, ${escapeHtml(s.location || '')}</span></li>
         `).join('');
-        const employeesHtml = (data.employees || []).map((e) => `
-          <details style="margin-bottom:0.4rem;">
-            <summary><strong>${escapeHtml(e.employee.name || '(unknown)')}</strong> <span class="muted">— ${escapeHtml(e.employee.department || '')}, ${e.registrations.length} record(s)</span></summary>
-            <ul style="margin:0.4rem 0 0.4rem 1.2rem;">
-              ${e.registrations.map((r) => `
-                <li>${escapeHtml(r.seminar.title || '(seminar)')} — ${escapeHtml(r.status || '')}${r.certificateIssued ? ` ✓ cert ${escapeHtml(r.certificateCode || '')}` : ''}</li>
-              `).join('')}
-            </ul>
-          </details>
-        `).join('');
+
+        const allEmployees = Array.isArray(data.employees) ? data.employees : [];
+
         archiveDetail.innerHTML = `
           <div class="card" style="margin-top:0.5rem;">
             <h3 style="margin-top:0;">Archive — ${escapeHtml(data.schoolYear)}</h3>
             <p class="muted">${data.counts.seminars} seminar(s), ${data.counts.registrations} registration(s), ${data.counts.employees} employee(s).</p>
             <h4>Seminars</h4>
             <ul>${seminarsHtml || '<li class="muted">None</li>'}</ul>
-            <h4>Employees</h4>
-            ${employeesHtml || '<p class="muted">None</p>'}
+            <h4 style="margin-bottom:0.4rem;">Employees</h4>
+            <div style="display:flex; gap:0.6rem; align-items:center; margin-bottom:0.65rem; flex-wrap:wrap;">
+              <input
+                type="text"
+                id="archive-employee-search"
+                placeholder="Search by name, department, email, position, or seminar title…"
+                autocomplete="off"
+                style="flex:1; min-width:240px; padding:0.5rem 0.7rem; border:1px solid var(--border); border-radius:0.5rem;"
+              />
+              <span class="muted small" id="archive-employee-search-count"></span>
+            </div>
+            <div id="archive-employees-list">${buildEmployeesHtml(allEmployees)}</div>
           </div>
         `;
+
+        const searchInput = document.getElementById('archive-employee-search');
+        const listEl = document.getElementById('archive-employees-list');
+        const countEl = document.getElementById('archive-employee-search-count');
+
+        const updateCount = (visible) => {
+          if (!countEl) return;
+          if (visible === allEmployees.length) {
+            countEl.textContent = `${allEmployees.length} employee(s)`;
+          } else {
+            countEl.textContent = `${visible} of ${allEmployees.length} match`;
+          }
+        };
+
+        updateCount(allEmployees.length);
+
+        if (searchInput && listEl) {
+          searchInput.addEventListener('input', () => {
+            const filtered = filterArchiveEmployees(allEmployees, searchInput.value);
+            listEl.innerHTML = buildEmployeesHtml(filtered);
+            updateCount(filtered.length);
+          });
+        }
       } catch (err) {
         archiveDetail.innerHTML = `<p class="muted">${escapeHtml(err.message || 'Failed.')}</p>`;
       }
@@ -3241,6 +3535,593 @@ document.addEventListener('DOMContentLoaded', () => {
   setTopbarFromToken();
   setDeletedSeminarsModalVisibility(false);
   showNavModule('dashboard');
+  // ============== Weekly Backup Banner (hero) ==============
+  const weeklyBackupBanner = document.getElementById('weekly-backup-banner');
+  const weeklyBackupHeadline = document.getElementById('weekly-backup-headline');
+  const weeklyBackupSub = document.getElementById('weekly-backup-sub');
+  const weeklyBackupDownloadBtn = document.getElementById('weekly-backup-download-btn');
+  const weeklyBackupConfirmBtn = document.getElementById('weekly-backup-confirm-btn');
+
+  let weeklyBackupDownloadedThisSession = false;
+
+  const renderWeeklyBackupBanner = (data) => {
+    if (!weeklyBackupBanner) return;
+    weeklyBackupBanner.classList.remove('is-ok', 'is-upcoming', 'is-overdue');
+    weeklyBackupBanner.style.display = 'flex';
+
+    const days = data?.daysSince;
+    const interval = data?.intervalDays || 7;
+
+    if (data?.isOverdue) {
+      weeklyBackupBanner.classList.add('is-overdue');
+      const dayLabel = !data?.lastConfirmedAt
+        ? 'never'
+        : `${Math.floor(days)} day${Math.floor(days) === 1 ? '' : 's'} ago`;
+      weeklyBackupHeadline.textContent = '⚠ Weekly backup overdue — Back up now';
+      weeklyBackupSub.textContent = `Last confirmed: ${dayLabel}. Required every ${interval} days.`;
+    } else if (data?.isUpcoming) {
+      weeklyBackupBanner.classList.add('is-upcoming');
+      const remaining = Math.max(0, Math.ceil(interval - days));
+      weeklyBackupHeadline.textContent = 'Weekly backup due soon';
+      weeklyBackupSub.textContent = `Next required in ~${remaining} day${remaining === 1 ? '' : 's'}.`;
+    } else {
+      weeklyBackupBanner.classList.add('is-ok');
+      const ago = days != null ? Math.floor(days) : null;
+      weeklyBackupHeadline.textContent = '✓ Weekly backup up to date';
+      const remaining = days != null ? Math.max(0, Math.ceil(interval - days)) : interval;
+      weeklyBackupSub.textContent = ago != null
+        ? `Last confirmed ${ago} day${ago === 1 ? '' : 's'} ago. Next required in ~${remaining} day${remaining === 1 ? '' : 's'}.`
+        : `Required every ${interval} days.`;
+    }
+
+    if (weeklyBackupConfirmBtn) {
+      const enable = weeklyBackupDownloadedThisSession;
+      weeklyBackupConfirmBtn.disabled = !enable;
+      weeklyBackupConfirmBtn.title = enable
+        ? 'Click to mark this week\'s backup as saved.'
+        : 'Download the CSV first, then click here once you\'ve saved it.';
+    }
+  };
+
+  const refreshWeeklyBackupStatus = async () => {
+    try {
+      const res = await authedFetch('/api/admin/maintenance/weekly-export/status');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || 'Failed to load backup status.');
+      renderWeeklyBackupBanner(data);
+    } catch (err) {
+      console.error('[weekly-backup] status failed', err);
+      if (weeklyBackupBanner) weeklyBackupBanner.style.display = 'none';
+    }
+  };
+
+  if (weeklyBackupDownloadBtn) {
+    weeklyBackupDownloadBtn.addEventListener('click', async () => {
+      try {
+        weeklyBackupDownloadBtn.disabled = true;
+        const original = weeklyBackupDownloadBtn.textContent;
+        weeklyBackupDownloadBtn.textContent = 'Preparing…';
+
+        const res = await authedFetch('/api/admin/maintenance/weekly-export.csv');
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data?.message || 'Failed to generate backup CSV.');
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `GIMS-Weekly-Backup-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        weeklyBackupDownloadedThisSession = true;
+        weeklyBackupDownloadBtn.textContent = '✓ Downloaded';
+        if (weeklyBackupConfirmBtn) {
+          weeklyBackupConfirmBtn.disabled = false;
+          weeklyBackupConfirmBtn.title = 'Click to mark this week\'s backup as saved.';
+        }
+        setTimeout(() => {
+          weeklyBackupDownloadBtn.textContent = original;
+          weeklyBackupDownloadBtn.disabled = false;
+        }, 2000);
+      } catch (err) {
+        console.error('[weekly-backup] download failed', err);
+        weeklyBackupDownloadBtn.textContent = 'Download Backup (CSV)';
+        weeklyBackupDownloadBtn.disabled = false;
+        alert(err.message || 'Failed to download backup CSV.');
+      }
+    });
+  }
+
+  if (weeklyBackupConfirmBtn) {
+    weeklyBackupConfirmBtn.addEventListener('click', async () => {
+      if (!confirm('Confirm that you have saved this week\'s backup CSV to a secure location (Google Drive, USB, network share, etc.)?')) return;
+      try {
+        weeklyBackupConfirmBtn.disabled = true;
+        const res = await authedFetch('/api/admin/maintenance/weekly-export/confirm', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || 'Failed to confirm backup.');
+        weeklyBackupDownloadedThisSession = false;
+        await refreshWeeklyBackupStatus();
+      } catch (err) {
+        console.error('[weekly-backup] confirm failed', err);
+        alert(err.message || 'Failed to confirm backup.');
+        weeklyBackupConfirmBtn.disabled = false;
+      }
+    });
+  }
+
+  refreshWeeklyBackupStatus().catch(() => {});
+
+  // ============== Database Snapshot ==============
+  const snapshotRunBtn = document.getElementById('snapshot-run-btn');
+  const snapshotRestoreBtn = document.getElementById('snapshot-restore-btn');
+  const snapshotStatus = document.getElementById('snapshot-status');
+  const snapshotLastTime = document.getElementById('snapshot-last-time');
+  const snapshotLastMeta = document.getElementById('snapshot-last-meta');
+  const snapshotStatusBox = document.getElementById('snapshot-status-box');
+  const snapshotRestoreModal = document.getElementById('snapshot-restore-modal');
+  const snapshotRestoreMeta = document.getElementById('snapshot-restore-meta');
+  const snapshotRestorePhrase = document.getElementById('snapshot-restore-phrase');
+  const snapshotRestoreCancel = document.getElementById('snapshot-restore-cancel');
+  const snapshotRestoreConfirm = document.getElementById('snapshot-restore-confirm');
+  const snapshotRestoreStatus = document.getElementById('snapshot-restore-status');
+
+  const renderSnapshotStatus = (data) => {
+    if (!snapshotLastTime) return;
+    if (!data?.exists || !data?.snapshotAt) {
+      snapshotLastTime.textContent = 'No snapshot yet';
+      snapshotLastTime.style.color = '#b45309';
+      if (snapshotLastMeta) snapshotLastMeta.textContent = '';
+      if (snapshotStatusBox) snapshotStatusBox.style.background = 'rgba(245,158,11,0.10)';
+      return;
+    }
+    const when = new Date(data.snapshotAt);
+    const ageMs = Date.now() - when.getTime();
+    const ageHours = Math.floor(ageMs / (60 * 60 * 1000));
+    const ageStr = ageHours < 1 ? 'just now' : ageHours < 24 ? `${ageHours}h ago` : `${Math.floor(ageHours / 24)}d ago`;
+    snapshotLastTime.textContent = `${when.toLocaleString()} (${ageStr})`;
+    const isStale = ageHours >= 48;
+    snapshotLastTime.style.color = isStale ? '#b91c1c' : '#059669';
+    if (snapshotLastMeta) {
+      snapshotLastMeta.textContent = `• ${data.totalDocs || 0} docs across ${data.collections?.length || 0} collections${data.triggeredBy ? ` • by ${data.triggeredBy}` : ''}`;
+    }
+    if (snapshotStatusBox) {
+      snapshotStatusBox.style.background = isStale ? 'rgba(220,38,38,0.06)' : 'rgba(16,185,129,0.06)';
+    }
+  };
+
+  const refreshSnapshotStatus = async () => {
+    try {
+      const res = await authedFetch('/api/admin/maintenance/snapshot/status');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || 'Failed to load snapshot status.');
+      renderSnapshotStatus(data);
+      return data;
+    } catch (err) {
+      if (snapshotStatus) snapshotStatus.textContent = err.message || 'Failed to load snapshot status.';
+      return null;
+    }
+  };
+
+  if (snapshotRunBtn) {
+    snapshotRunBtn.addEventListener('click', async () => {
+      if (!confirm('Take a snapshot of the live database now? This may take a few seconds.')) return;
+      try {
+        snapshotRunBtn.disabled = true;
+        if (snapshotStatus) {
+          snapshotStatus.style.color = '';
+          snapshotStatus.textContent = 'Creating snapshot…';
+        }
+        const res = await authedFetch('/api/admin/maintenance/snapshot', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || 'Snapshot failed.');
+        if (snapshotStatus) {
+          snapshotStatus.style.color = '#059669';
+          snapshotStatus.textContent = `Snapshot saved: ${data.totalDocs} docs across ${data.collections?.length || 0} collections.`;
+        }
+        await refreshSnapshotStatus();
+      } catch (err) {
+        if (snapshotStatus) {
+          snapshotStatus.style.color = '#b91c1c';
+          snapshotStatus.textContent = err.message || 'Snapshot failed.';
+        }
+      } finally {
+        snapshotRunBtn.disabled = false;
+      }
+    });
+  }
+
+  const closeSnapshotRestoreModal = () => {
+    if (snapshotRestoreModal) snapshotRestoreModal.style.display = 'none';
+    if (snapshotRestorePhrase) snapshotRestorePhrase.value = '';
+    if (snapshotRestoreStatus) {
+      snapshotRestoreStatus.textContent = '';
+      snapshotRestoreStatus.style.color = '';
+    }
+  };
+
+  if (snapshotRestoreBtn) {
+    snapshotRestoreBtn.addEventListener('click', async () => {
+      const status = await refreshSnapshotStatus();
+      if (!status?.exists) {
+        if (snapshotStatus) {
+          snapshotStatus.style.color = '#b91c1c';
+          snapshotStatus.textContent = 'No snapshot exists yet. Run "Snapshot Now" first.';
+        }
+        return;
+      }
+      if (snapshotRestoreMeta) {
+        const when = status.snapshotAt ? new Date(status.snapshotAt).toLocaleString() : 'unknown';
+        snapshotRestoreMeta.textContent = `Snapshot to restore: ${when} • ${status.totalDocs || 0} docs across ${status.collections?.length || 0} collections.`;
+      }
+      if (snapshotRestoreModal) snapshotRestoreModal.style.display = 'flex';
+    });
+  }
+  if (snapshotRestoreCancel) snapshotRestoreCancel.addEventListener('click', closeSnapshotRestoreModal);
+  if (snapshotRestoreModal) {
+    snapshotRestoreModal.addEventListener('click', (event) => {
+      if (event.target === snapshotRestoreModal) closeSnapshotRestoreModal();
+    });
+  }
+
+  if (snapshotRestoreConfirm) {
+    snapshotRestoreConfirm.addEventListener('click', async () => {
+      const phrase = (snapshotRestorePhrase?.value || '').trim();
+      if (phrase !== 'GIMS RESTORE') {
+        if (snapshotRestoreStatus) {
+          snapshotRestoreStatus.style.color = '#b91c1c';
+          snapshotRestoreStatus.textContent = 'Type the confirmation phrase exactly.';
+        }
+        return;
+      }
+      try {
+        snapshotRestoreConfirm.disabled = true;
+        if (snapshotRestoreStatus) {
+          snapshotRestoreStatus.style.color = '';
+          snapshotRestoreStatus.textContent = 'Restoring from snapshot…';
+        }
+        const res = await authedFetch('/api/admin/maintenance/snapshot/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phrase }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || 'Restore failed.');
+        if (snapshotRestoreStatus) {
+          snapshotRestoreStatus.style.color = '#059669';
+          snapshotRestoreStatus.textContent = `Restored ${data.totalDocs} docs across ${data.collections?.length || 0} collections.`;
+        }
+        // Reload the page so cached UI matches the restored DB.
+        setTimeout(() => window.location.reload(), 1200);
+      } catch (err) {
+        if (snapshotRestoreStatus) {
+          snapshotRestoreStatus.style.color = '#b91c1c';
+          snapshotRestoreStatus.textContent = err.message || 'Restore failed.';
+        }
+      } finally {
+        snapshotRestoreConfirm.disabled = false;
+      }
+    });
+  }
+
+  // Load initial snapshot status when the maintenance section is opened.
+  refreshSnapshotStatus().catch(() => {});
+
+  // ============== Record Past Seminar ==============
+  const pastSeminarBtn = document.getElementById('admin-record-past-seminar-btn');
+  const pastSeminarModal = document.getElementById('admin-record-past-seminar-modal');
+  const pastSeminarCloseBtn = document.getElementById('admin-record-past-seminar-close');
+  const pastSeminarForm = document.getElementById('admin-record-past-seminar-form');
+  const pastSeminarStatus = document.getElementById('admin-record-past-seminar-status');
+
+  const closePastSeminarModal = () => {
+    if (pastSeminarModal) pastSeminarModal.style.display = 'none';
+    if (pastSeminarStatus) {
+      pastSeminarStatus.textContent = '';
+      pastSeminarStatus.style.color = '';
+    }
+  };
+
+  if (pastSeminarBtn && pastSeminarModal) {
+    pastSeminarBtn.addEventListener('click', () => {
+      if (pastSeminarStatus) {
+        pastSeminarStatus.textContent = '';
+        pastSeminarStatus.style.color = '';
+      }
+      pastSeminarModal.style.display = 'flex';
+    });
+  }
+  if (pastSeminarCloseBtn) pastSeminarCloseBtn.addEventListener('click', closePastSeminarModal);
+  if (pastSeminarModal) {
+    pastSeminarModal.addEventListener('click', (event) => {
+      if (event.target === pastSeminarModal) closePastSeminarModal();
+    });
+  }
+
+  if (pastSeminarForm) {
+    pastSeminarForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (pastSeminarStatus) pastSeminarStatus.textContent = 'Creating…';
+      try {
+        const fd = new FormData(pastSeminarForm);
+        const payload = {
+          title: fd.get('title'),
+          date: fd.get('date'),
+          startTime: fd.get('startTime'),
+          durationHours: Number(fd.get('durationHours')) || 1,
+          mandatory: fd.get('mandatory') === 'true',
+          capacity: Number(fd.get('capacity')) || 999,
+          location: fd.get('location'),
+          resourcePerson: fd.get('resourcePerson'),
+          description: fd.get('description'),
+        };
+        const res = await authedFetch('/api/admin/maintenance/seminars/past', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || 'Failed to record past seminar.');
+        if (pastSeminarStatus) {
+          pastSeminarStatus.style.color = '#059669';
+          pastSeminarStatus.textContent = data.message || 'Past seminar recorded.';
+        }
+        pastSeminarForm.reset();
+        const startTimeField = pastSeminarForm.querySelector('[name="startTime"]');
+        if (startTimeField) startTimeField.value = '08:00';
+        // Refresh seminars carousel so the new one appears.
+        if (typeof loadAll === 'function') loadAll().catch(() => {});
+        // Auto-close the modal after a moment so the admin sees the success message.
+        setTimeout(() => closePastSeminarModal(), 1200);
+      } catch (err) {
+        if (pastSeminarStatus) {
+          pastSeminarStatus.style.color = '#b91c1c';
+          pastSeminarStatus.textContent = err.message || 'Failed to create past seminar.';
+        }
+      }
+    });
+  }
+
+  // ============== Attendance Import ==============
+  const importBtn = document.getElementById('admin-import-attendance-btn');
+  const importModal = document.getElementById('admin-import-attendance-modal');
+  const importClose = document.getElementById('admin-import-attendance-close');
+  const importDownloadBtn = document.getElementById('admin-import-download-template-btn');
+  const importFileInput = document.getElementById('admin-import-file-input');
+  const importFileName = document.getElementById('admin-import-file-name');
+  const importPreviewWrap = document.getElementById('admin-import-preview-wrap');
+  const importPreviewSummary = document.getElementById('admin-import-preview-summary');
+  const importPreviewTable = document.getElementById('admin-import-preview-table');
+  const importIssueCerts = document.getElementById('admin-import-issue-certs');
+  const importCancelBtn = document.getElementById('admin-import-cancel-btn');
+  const importCommitBtn = document.getElementById('admin-import-commit-btn');
+  const importStatus = document.getElementById('admin-import-status');
+  const confirmModal = document.getElementById('admin-import-confirm-modal');
+  const confirmText = document.getElementById('admin-import-confirm-text');
+  const confirmCertLine = document.getElementById('admin-import-confirm-cert-line');
+  const confirmOk = document.getElementById('admin-import-confirm-ok');
+  const confirmCancel = document.getElementById('admin-import-confirm-cancel');
+
+  let importSelectedFile = null;
+  let importPreviewData = null;
+
+  const resetImportState = () => {
+    importSelectedFile = null;
+    importPreviewData = null;
+    if (importFileInput) importFileInput.value = '';
+    if (importFileName) importFileName.textContent = 'No file chosen';
+    if (importPreviewWrap) importPreviewWrap.style.display = 'none';
+    if (importPreviewTable) importPreviewTable.innerHTML = '';
+    if (importPreviewSummary) importPreviewSummary.textContent = '';
+    if (importStatus) importStatus.textContent = '';
+  };
+
+  const renderImportPreview = (data) => {
+    if (!importPreviewTable || !importPreviewSummary || !importPreviewWrap) return;
+    const valid = Array.isArray(data?.valid) ? data.valid : [];
+    const errors = Array.isArray(data?.errors) ? data.errors : [];
+
+    importPreviewSummary.innerHTML =
+      `<strong style="color:#059669;">${valid.length} valid</strong> &nbsp;·&nbsp; ` +
+      `<strong style="color:#b91c1c;">${errors.length} error${errors.length === 1 ? '' : 's'}</strong> ` +
+      `&nbsp;·&nbsp; ${data?.totalRows || 0} total row(s) parsed`;
+
+    const cell = (v) => `<td style="padding:0.45rem 0.6rem; border-bottom:1px solid var(--border); font-size:0.85rem;">${escapeHtml(String(v ?? ''))}</td>`;
+
+    const header = `
+      <thead style="background:#f3f4f6; position:sticky; top:0;">
+        <tr>
+          <th style="padding:0.45rem 0.6rem; text-align:left; font-size:0.78rem;">Row</th>
+          <th style="padding:0.45rem 0.6rem; text-align:left; font-size:0.78rem;">Email</th>
+          <th style="padding:0.45rem 0.6rem; text-align:left; font-size:0.78rem;">Seminar</th>
+          <th style="padding:0.45rem 0.6rem; text-align:left; font-size:0.78rem;">Date</th>
+          <th style="padding:0.45rem 0.6rem; text-align:left; font-size:0.78rem;">Eval?</th>
+          <th style="padding:0.45rem 0.6rem; text-align:left; font-size:0.78rem;">Status</th>
+        </tr>
+      </thead>`;
+
+    const validRows = valid.map((r) => `
+      <tr style="background:rgba(16,185,129,0.04);">
+        ${cell(r.rowNumber)}
+        ${cell(r.email)}
+        ${cell(r.title)}
+        ${cell(r.dateAttended)}
+        ${cell(r.evaluationCompleted ? 'yes' : 'no')}
+        <td style="padding:0.45rem 0.6rem; border-bottom:1px solid var(--border); font-size:0.85rem; color:#059669; font-weight:600;">✓ Will import</td>
+      </tr>`).join('');
+
+    const errorRows = errors.map((r) => `
+      <tr style="background:rgba(220,38,38,0.06);">
+        ${cell(r.rowNumber)}
+        ${cell(r.email)}
+        ${cell(r.title)}
+        ${cell(r.dateAttended)}
+        ${cell(r.evaluationCompleted ? 'yes' : 'no')}
+        <td style="padding:0.45rem 0.6rem; border-bottom:1px solid var(--border); font-size:0.82rem; color:#b91c1c;">✕ ${escapeHtml((r.issues || []).join('; '))}</td>
+      </tr>`).join('');
+
+    importPreviewTable.innerHTML = `<table style="width:100%; border-collapse:collapse;">${header}<tbody>${errorRows}${validRows}</tbody></table>`;
+    importPreviewWrap.style.display = 'block';
+    if (importCommitBtn) importCommitBtn.disabled = valid.length === 0;
+  };
+
+  const closeImportModal = () => {
+    if (importModal) importModal.style.display = 'none';
+    resetImportState();
+  };
+
+  if (importBtn && importModal) {
+    importBtn.addEventListener('click', () => {
+      resetImportState();
+      importModal.style.display = 'flex';
+    });
+  }
+  if (importClose) importClose.addEventListener('click', closeImportModal);
+  if (importModal) {
+    importModal.addEventListener('click', (event) => {
+      if (event.target === importModal) closeImportModal();
+    });
+  }
+  if (confirmModal) {
+    confirmModal.addEventListener('click', (event) => {
+      if (event.target === confirmModal) closeConfirmPopup();
+    });
+  }
+  if (importCancelBtn) importCancelBtn.addEventListener('click', () => {
+    importPreviewWrap.style.display = 'none';
+    resetImportState();
+  });
+
+  if (importDownloadBtn) {
+    importDownloadBtn.addEventListener('click', async () => {
+      try {
+        if (importStatus) importStatus.textContent = 'Generating template…';
+        const res = await authedFetch('/api/admin/attendance-import/template.xlsx');
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data?.message || 'Failed to generate template.');
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `GIMS-Attendance-Import-Template-${new Date().toISOString().slice(0, 10)}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        if (importStatus) importStatus.textContent = 'Template downloaded.';
+      } catch (err) {
+        if (importStatus) importStatus.textContent = err.message || 'Failed to download template.';
+      }
+    });
+  }
+
+  if (importFileInput) {
+    importFileInput.addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      importSelectedFile = file;
+      if (importFileName) importFileName.textContent = file.name;
+      if (importStatus) importStatus.textContent = 'Parsing & validating…';
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await authedFetch('/api/admin/attendance-import/preview', {
+          method: 'POST',
+          body: formData,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || 'Failed to read file.');
+        importPreviewData = data;
+        renderImportPreview(data);
+        if (importStatus) importStatus.textContent = '';
+      } catch (err) {
+        importPreviewData = null;
+        if (importPreviewWrap) importPreviewWrap.style.display = 'none';
+        if (importStatus) importStatus.textContent = err.message || 'Failed to read file.';
+      }
+    });
+  }
+
+  const openConfirmPopup = () => {
+    if (!confirmModal || !importPreviewData) return;
+    const validCount = importPreviewData.validCount || 0;
+    const errorCount = importPreviewData.errorCount || 0;
+    const issueCerts = Boolean(importIssueCerts?.checked);
+
+    if (confirmText) {
+      confirmText.innerHTML =
+        `You are about to import <strong>${validCount}</strong> attendance record(s)` +
+        (errorCount ? ` (<strong>${errorCount}</strong> row${errorCount === 1 ? '' : 's'} with errors will be skipped)` : '') +
+        `.`;
+    }
+    if (confirmCertLine) {
+      confirmCertLine.innerHTML = issueCerts
+        ? '✓ <strong>Certificates will be issued</strong> for all imported attendees, following each seminar\'s release policy.'
+        : '⚠ <strong>Certificates will NOT be issued</strong> in this import. You can release them later from the seminar\'s participants modal.';
+      confirmCertLine.style.background = issueCerts ? 'rgba(16,185,129,0.08)' : 'rgba(245,158,11,0.08)';
+      confirmCertLine.style.borderColor = issueCerts ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.3)';
+    }
+    confirmModal.style.display = 'flex';
+  };
+
+  const closeConfirmPopup = () => {
+    if (confirmModal) confirmModal.style.display = 'none';
+  };
+
+  if (importCommitBtn) {
+    importCommitBtn.addEventListener('click', () => {
+      if (!importPreviewData || !importSelectedFile) return;
+      if ((importPreviewData.validCount || 0) === 0) {
+        if (importStatus) importStatus.textContent = 'No valid rows to import. Fix the errors and re-upload.';
+        return;
+      }
+      openConfirmPopup();
+    });
+  }
+
+  if (confirmCancel) confirmCancel.addEventListener('click', closeConfirmPopup);
+
+  if (confirmOk) {
+    confirmOk.addEventListener('click', async () => {
+      closeConfirmPopup();
+      if (!importSelectedFile) return;
+      try {
+        if (importStatus) importStatus.textContent = 'Importing…';
+        if (importCommitBtn) importCommitBtn.disabled = true;
+        const formData = new FormData();
+        formData.append('file', importSelectedFile);
+        formData.append('issueCertificates', importIssueCerts?.checked ? 'true' : 'false');
+        const res = await authedFetch('/api/admin/attendance-import/commit', {
+          method: 'POST',
+          body: formData,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || 'Import failed.');
+        const parts = [`Imported ${data.imported || 0} record(s).`];
+        if (data.skipped) parts.push(`${data.skipped} row(s) skipped due to errors.`);
+        if (data.certificatesIssued) parts.push(`${data.certificatesIssued} certificate(s) issued.`);
+        if (importStatus) importStatus.textContent = parts.join(' ');
+        if (importPreviewWrap) importPreviewWrap.style.display = 'none';
+        importSelectedFile = null;
+        importPreviewData = null;
+        if (importFileInput) importFileInput.value = '';
+        if (importFileName) importFileName.textContent = 'No file chosen';
+        // Refresh seminars carousel/employee list so updated counts show.
+        if (typeof loadAll === 'function') loadAll().catch(() => {});
+      } catch (err) {
+        if (importStatus) importStatus.textContent = err.message || 'Import failed.';
+      } finally {
+        if (importCommitBtn) importCommitBtn.disabled = false;
+      }
+    });
+  }
+
   loadAll().catch((err) => {
     console.error('[admin] loadAll failed', err);
     employeesStatusEl.textContent = err.message || 'Failed to load admin dashboard.';

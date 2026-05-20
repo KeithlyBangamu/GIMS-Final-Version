@@ -1,4 +1,5 @@
 import puppeteer from 'puppeteer';
+import Employee from '../models/Employee.js';
 import { sendCertificateEmail } from './emailService.js';
 
 const escapeHtml = (value) => {
@@ -189,13 +190,18 @@ export const buildCertificateHtml = ({
 };
 
 export const renderCertificateBuffer = async ({ html }) => {
+  // NOTE: --single-process was previously set but is unstable on Render/low-mem
+  // environments and was the source of intermittent "TargetCloseError: Target
+  // closed" crashes (returned to the client as 502 Bad Gateway).
   const launchOptions = {
     headless: true,
+    protocolTimeout: 60_000,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--single-process',
+      '--disable-gpu',
+      '--no-zygote',
     ],
   };
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
@@ -205,11 +211,15 @@ export const renderCertificateBuffer = async ({ html }) => {
 
   try {
     const page = await browser.newPage();
+    page.setDefaultNavigationTimeout(45_000);
+    page.setDefaultTimeout(45_000);
     await page.setViewport({ width: 1754, height: 1240, deviceScaleFactor: 1 });
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    return page.screenshot({ type: 'png', fullPage: false });
+    // The certificate HTML has no external network resources, so
+    // 'domcontentloaded' is sufficient and avoids networkidle0 hangs.
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    return await page.screenshot({ type: 'png', fullPage: false });
   } finally {
-    await browser.close();
+    try { await browser.close(); } catch { /* ignore close errors */ }
   }
 };
 
@@ -249,16 +259,26 @@ export const issueCertificateForRegistration = async ({
   if (String(registration.status || '').toLowerCase() !== 'attended') return null;
   if (registration.certificateIssued) return registration;
 
+  // Defensive: callers sometimes pass a stub { _id } without accountStatus/email.
+  // Load the real employee so the deactivation gate works correctly.
+  let employeeRecord = employee;
+  if (employee && employee._id && (employee.accountStatus === undefined || employee.email === undefined)) {
+    const fetched = await Employee.findById(employee._id);
+    if (fetched) employeeRecord = fetched;
+  }
+
   registration.certificateIssued = true;
   registration.certificateIssuedAt = new Date();
   registration.certificateCode =
     registration.certificateCode ||
-    makeCertificateCode({ seminarId: seminar._id, employeeId: employee._id, registrationId: registration._id });
+    makeCertificateCode({ seminarId: seminar._id, employeeId: employeeRecord._id, registrationId: registration._id });
   await registration.save();
 
-  if (Notification) {
+  const isDeactivated = employeeRecord.accountStatus === 'deactivated';
+
+  if (Notification && !isDeactivated) {
     await Notification.create({
-      employeeID: employee._id,
+      employeeID: employeeRecord._id,
       type: 'certificate',
       message: `Your certificate for \"${seminar.title}\" is now available. You can download it from your dashboard.`,
       seminarID: seminar._id,
@@ -266,8 +286,8 @@ export const issueCertificateForRegistration = async ({
     });
   }
 
-  if (employee.email) {
-    queueCertificateEmail({ employee, seminar, registration });
+  if (employeeRecord.email && !isDeactivated) {
+    queueCertificateEmail({ employee: employeeRecord, seminar, registration });
   }
 
   return registration;

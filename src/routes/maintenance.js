@@ -15,6 +15,12 @@ import {
   currentSchoolYear,
   isValidSchoolYear,
 } from '../services/schoolYearService.js';
+import {
+  runSnapshot,
+  restoreFromSnapshot,
+  getSnapshotStatus,
+  BACKUP_DATABASE_NAME,
+} from '../services/backupDatabaseService.js';
 
 const router = express.Router();
 
@@ -33,6 +39,7 @@ const authMiddleware = (req, res, next) => {
 };
 
 const RESET_PHRASE = 'GIMS MAINTENANCE';
+const RESTORE_PHRASE = 'GIMS RESTORE';
 
 const displayValue = (value) => {
   if (value === null || value === undefined) return 'None';
@@ -814,6 +821,317 @@ router.post('/backfill-school-year', authMiddleware, async (req, res, next) => {
       message: 'Backfill complete',
       seminarsUpdated,
       registrationsUpdated,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Quick-add a past seminar that ran outside GIMS (e.g. during downtime).
+// Creates the seminar already marked as held, so it can be used immediately
+// by the attendance import flow.
+router.post('/seminars/past', authMiddleware, async (req, res, next) => {
+  try {
+    const {
+      title,
+      date,
+      startTime,
+      durationHours,
+      location,
+      resourcePerson,
+      description,
+      mandatory,
+      capacity,
+    } = req.body || {};
+
+    if (!title || !String(title).trim()) {
+      return res.status(400).json({ message: 'Seminar title is required.' });
+    }
+    if (!date) {
+      return res.status(400).json({ message: 'Date is required.' });
+    }
+
+    const cleanTitle = String(title).trim();
+
+    const existing = await Seminar.findOne({ title: cleanTitle, isDeleted: { $ne: true } });
+    if (existing) {
+      return res.status(409).json({
+        message: `A seminar titled "${cleanTitle}" already exists. Use the attendance import directly.`,
+        seminar: { id: existing._id, title: existing.title, isHeld: existing.isHeld },
+      });
+    }
+
+    const heldDate = new Date(date);
+    if (Number.isNaN(heldDate.getTime())) {
+      return res.status(400).json({ message: 'Invalid date.' });
+    }
+
+    const seminar = await Seminar.create({
+      title: cleanTitle,
+      description: String(description || '').trim() || `Past seminar recorded via Maintenance backfill on ${new Date().toISOString().slice(0, 10)}.`,
+      location: String(location || '').trim(),
+      resourcePerson: String(resourcePerson || '').trim(),
+      date: heldDate,
+      startTime: String(startTime || '08:00').trim(),
+      durationHours: Number(durationHours) > 0 ? Number(durationHours) : 1,
+      mandatory: mandatory === true || mandatory === 'true',
+      capacity: Number(capacity) > 0 ? Number(capacity) : 999,
+      isHeld: true,
+      heldAt: new Date(),
+      createdBy: req.user?.id,
+      certificateReleaseMode: 'evaluation',
+    });
+
+    try {
+      await MaintenanceLog.create({
+        action: 'attendance-import',
+        schoolYear: getSchoolYear(heldDate) || currentSchoolYear() || 'unknown',
+        triggeredBy: req.user?.id,
+        triggeredByEmail: req.user?.email,
+        notes: `Past seminar backfilled: "${cleanTitle}" (${heldDate.toISOString().slice(0, 10)}).`,
+      });
+    } catch (logErr) {
+      console.error('Failed to write past-seminar maintenance log:', logErr.message);
+    }
+
+    res.status(201).json({
+      message: 'Past seminar created. You can now import attendance for it.',
+      seminar,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============== Database Snapshot (in-Atlas backup) ==============
+
+router.get('/snapshot/status', authMiddleware, async (req, res, next) => {
+  try {
+    const status = await getSnapshotStatus();
+    res.json({
+      backupDatabase: BACKUP_DATABASE_NAME,
+      ...status,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/snapshot', authMiddleware, async (req, res, next) => {
+  try {
+    const result = await runSnapshot({ triggeredBy: req.user?.email || 'admin' });
+
+    try {
+      await MaintenanceLog.create({
+        action: 'snapshot-create',
+        schoolYear: currentSchoolYear() || 'unknown',
+        triggeredBy: req.user?.id,
+        triggeredByEmail: req.user?.email,
+        counts: {
+          registrationsArchived: 0,
+          seminarsArchived: 0,
+          employeesAffected: 0,
+          registrationsRestored: result.totalDocs,
+          seminarsRestored: result.collections.length,
+        },
+        notes: `Manual snapshot: ${result.totalDocs} docs across ${result.collections.length} collections.`,
+      });
+    } catch (logErr) {
+      console.error('[snapshot] failed to write maintenance log:', logErr.message);
+    }
+
+    res.json({
+      message: 'Snapshot created.',
+      totalDocs: result.totalDocs,
+      collections: result.collections,
+      snapshotAt: result.finishedAt,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/snapshot/restore', authMiddleware, async (req, res, next) => {
+  try {
+    const phrase = String(req.body?.phrase || '').trim();
+    if (phrase !== RESTORE_PHRASE) {
+      return res.status(400).json({
+        message: `To restore, type exactly: ${RESTORE_PHRASE}`,
+      });
+    }
+
+    const status = await getSnapshotStatus();
+    if (!status?.exists) {
+      return res.status(400).json({
+        message: 'No snapshot exists yet. Run "Snapshot Now" first.',
+      });
+    }
+
+    const result = await restoreFromSnapshot({ triggeredBy: req.user?.email || 'admin' });
+
+    try {
+      await MaintenanceLog.create({
+        action: 'snapshot-restore',
+        schoolYear: currentSchoolYear() || 'unknown',
+        triggeredBy: req.user?.id,
+        triggeredByEmail: req.user?.email,
+        counts: {
+          registrationsArchived: 0,
+          seminarsArchived: 0,
+          employeesAffected: 0,
+          registrationsRestored: result.totalDocs,
+          seminarsRestored: result.collections.length,
+        },
+        notes: `Restored from snapshot taken ${status.snapshotAt ? new Date(status.snapshotAt).toISOString() : 'unknown'}. ${result.totalDocs} docs across ${result.collections.length} collections.`,
+      });
+    } catch (logErr) {
+      console.error('[snapshot] failed to write restore maintenance log:', logErr.message);
+    }
+
+    res.json({
+      message: 'Database restored from snapshot.',
+      totalDocs: result.totalDocs,
+      collections: result.collections,
+      restoredFrom: status.snapshotAt,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ============== Weekly CSV Export (human-held backup) ==============
+
+const WEEKLY_EXPORT_DAYS = Number(process.env.WEEKLY_EXPORT_DAYS || 7);
+
+const csvEscape = (value) => {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return value.toISOString();
+  let s;
+  if (typeof value === 'object') {
+    try { s = JSON.stringify(value); } catch { s = String(value); }
+  } else {
+    s = String(value);
+  }
+  // RFC 4180: quote if contains comma, quote, newline; escape quotes by doubling.
+  if (/[",\r\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+};
+
+const buildCsvForCollection = async (collName) => {
+  const db = (await import('mongoose')).default.connection.db;
+  const coll = db.collection(collName);
+  const docs = await coll.find({}).toArray();
+  if (!docs.length) return `# ${collName} (0 rows)\n\n`;
+
+  // Determine column union across all docs so heterogeneous documents still render.
+  const colSet = new Set();
+  for (const doc of docs) {
+    Object.keys(doc).forEach((k) => colSet.add(k));
+  }
+  // Prefer _id and createdAt first when present
+  const cols = ['_id', ...Array.from(colSet).filter((c) => c !== '_id')];
+
+  const lines = [];
+  lines.push(`# ${collName} (${docs.length} rows)`);
+  lines.push(cols.map(csvEscape).join(','));
+  for (const doc of docs) {
+    lines.push(cols.map((c) => csvEscape(doc[c])).join(','));
+  }
+  lines.push('');
+  lines.push('');
+  return lines.join('\r\n');
+};
+
+router.get('/weekly-export.csv', authMiddleware, async (req, res, next) => {
+  try {
+    const mongoose = (await import('mongoose')).default;
+    const db = mongoose.connection.db;
+    const allColls = await db.listCollections({}, { nameOnly: false }).toArray();
+    const names = allColls
+      .filter((c) => c.type === 'collection' && !c.name.startsWith('system.'))
+      .map((c) => c.name)
+      .sort();
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="GIMS-Weekly-Backup-${stamp}.csv"`
+    );
+
+    res.write(`# GIMS Weekly Backup\r\n`);
+    res.write(`# Generated at: ${new Date().toISOString()}\r\n`);
+    res.write(`# Collections: ${names.length}\r\n`);
+    res.write(`\r\n`);
+
+    for (const name of names) {
+      const block = await buildCsvForCollection(name);
+      res.write(block);
+    }
+    res.end();
+
+    // Log the download (best-effort, don't fail the response if logging fails).
+    MaintenanceLog.create({
+      action: 'weekly-export-download',
+      schoolYear: currentSchoolYear() || 'unknown',
+      triggeredBy: req.user?.id,
+      triggeredByEmail: req.user?.email,
+      notes: `Weekly backup CSV downloaded (${names.length} collections).`,
+    }).catch((err) => console.error('[weekly-export] log failed:', err.message));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/weekly-export/confirm', authMiddleware, async (req, res, next) => {
+  try {
+    await MaintenanceLog.create({
+      action: 'weekly-export-confirmed',
+      schoolYear: currentSchoolYear() || 'unknown',
+      triggeredBy: req.user?.id,
+      triggeredByEmail: req.user?.email,
+      notes: 'Admin confirmed they saved the weekly backup CSV.',
+    });
+    res.json({ message: 'Weekly backup confirmed. Thank you.', confirmedAt: new Date() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/weekly-export/status', authMiddleware, async (req, res, next) => {
+  try {
+    const last = await MaintenanceLog.findOne({ action: 'weekly-export-confirmed' })
+      .sort({ createdAt: -1 })
+      .select('createdAt triggeredByEmail');
+
+    const intervalMs = WEEKLY_EXPORT_DAYS * 24 * 60 * 60 * 1000;
+    let daysSince = null;
+    let isOverdue = true;
+    let isUpcoming = false;
+    let nextDueAt = null;
+    let lastConfirmedAt = null;
+    let lastConfirmedBy = null;
+
+    if (last) {
+      lastConfirmedAt = last.createdAt;
+      lastConfirmedBy = last.triggeredByEmail || null;
+      const ageMs = Date.now() - new Date(last.createdAt).getTime();
+      daysSince = ageMs / (24 * 60 * 60 * 1000);
+      isOverdue = ageMs >= intervalMs;
+      isUpcoming = !isOverdue && ageMs >= (intervalMs - 2 * 24 * 60 * 60 * 1000);
+      nextDueAt = new Date(new Date(last.createdAt).getTime() + intervalMs);
+    }
+
+    res.json({
+      intervalDays: WEEKLY_EXPORT_DAYS,
+      lastConfirmedAt,
+      lastConfirmedBy,
+      daysSince,
+      isOverdue,
+      isUpcoming,
+      nextDueAt,
     });
   } catch (err) {
     next(err);

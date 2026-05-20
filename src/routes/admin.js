@@ -4,15 +4,18 @@ import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import ExcelJS from 'exceljs';
 
 import Employee from '../models/Employee.js';
+import MaintenanceLog from '../models/MaintenanceLog.js';
+import { currentSchoolYear } from '../services/schoolYearService.js';
 import Seminar from '../models/Seminar.js';
 import Registration from '../models/Registration.js';
 import Notification from '../models/Notification.js';
 import LearningMaterial from '../models/LearningMaterial.js';
 import Article from '../models/Article.js';
 import Evaluation from '../models/Evaluation.js';
-import { sendBulkReminders, sendReminderEmail } from '../services/emailService.js';
+import { sendBulkReminders, sendReminderEmail, sendNewSeminarAnnouncement } from '../services/emailService.js';
 import { runReminderTick } from '../services/seminarReminderScheduler.js';
 import User from '../models/User.js';
 import {
@@ -130,6 +133,14 @@ const purgeExpiredDeletedSeminars = async () => {
 
 const findActiveSeminarById = (id) => {
   return Seminar.findOne({ _id: id, isDeleted: { $ne: true } });
+};
+
+// Returns true if the employee exists and is not deactivated. Used to gate
+// notifications and emails so deactivated accounts are silent.
+const isEmployeeActive = async (employeeId) => {
+  if (!employeeId) return false;
+  const e = await Employee.findById(employeeId).select('accountStatus');
+  return !!e && e.accountStatus !== 'deactivated';
 };
 
 const buildActiveSeminarIdSet = async () => {
@@ -655,6 +666,17 @@ router.post('/seminars', authMiddleware, async (req, res, next) => {
       createdBy: req.user.id,
     });
 
+    // Notify all employees by email in the background — don't block the response.
+    setImmediate(() => {
+      sendNewSeminarAnnouncement({ seminar })
+        .then(({ sent }) => {
+          console.log(`New-seminar announcement sent to ${sent} recipient(s) for "${seminar.title}".`);
+        })
+        .catch((err) => {
+          console.error('New-seminar announcement failed:', err.message);
+        });
+    });
+
     res.status(201).json(seminar);
   } catch (err) {
     next(err);
@@ -873,6 +895,7 @@ router.post('/seminars/:id/attendance/finalize', authMiddleware, async (req, res
 
     const attendedRegs = registrations.filter((r) => r.status === 'attended');
     for (const reg of attendedRegs) {
+      if (!(await isEmployeeActive(reg.employeeID))) continue;
       await Notification.create({
         employeeID: reg.employeeID,
         type: 'evaluation',
@@ -1006,14 +1029,16 @@ router.post('/seminars/:id/approve', authMiddleware, async (req, res, next) => {
       reg.status = 'registered';
       await reg.save();
 
-      // Create approval notification
-      await Notification.create({
-        employeeID: reg.employeeID._id,
-        type: 'approval',
-        message: `You are officially part of the seminar: "${seminar.title}". You have been approved as an Official Participant.`,
-        seminarID: seminar._id,
-        registrationID: reg._id,
-      });
+      // Create approval notification (skip for deactivated employees)
+      if (await isEmployeeActive(reg.employeeID._id)) {
+        await Notification.create({
+          employeeID: reg.employeeID._id,
+          type: 'approval',
+          message: `You are officially part of the seminar: "${seminar.title}". You have been approved as an Official Participant.`,
+          seminarID: seminar._id,
+          registrationID: reg._id,
+        });
+      }
 
       approvedCount += 1;
     }
@@ -1032,6 +1057,24 @@ router.post('/seminars/:id/held', authMiddleware, async (req, res, next) => {
     const desired = (req.body && (req.body.isHeld ?? req.body.held));
     const targetHeld = typeof desired === 'boolean' ? desired : true;
     if (targetHeld && !seminar.isHeld) {
+      // Guard: cannot mark held until the seminar's start time has passed.
+      const sessions = Array.isArray(seminar.sessions) && seminar.sessions.length > 0
+        ? seminar.sessions
+        : [{ date: seminar.date, startTime: seminar.startTime, durationHours: seminar.durationHours }];
+      let earliestStart = null;
+      for (const sess of sessions) {
+        if (!sess?.date) continue;
+        const d = new Date(sess.date);
+        if (Number.isNaN(d.getTime())) continue;
+        const m = /^(\d{1,2}):(\d{2})$/.exec(String(sess.startTime || '').trim());
+        if (m) d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+        if (!earliestStart || d.getTime() < earliestStart.getTime()) earliestStart = d;
+      }
+      if (earliestStart && Date.now() < earliestStart.getTime()) {
+        return res.status(400).json({
+          message: `Cannot mark as held yet — seminar starts ${earliestStart.toLocaleString()}.`,
+        });
+      }
       seminar.isHeld = true;
       seminar.heldAt = new Date();
       await seminar.save();
@@ -1106,9 +1149,10 @@ router.post('/seminars/:id/attendance', authMiddleware, async (req, res, next) =
       );
     }
 
-    // Send evaluation notifications to attendees
+    // Send evaluation notifications to attendees (skip for deactivated employees)
     const attendedRegs = registrations.filter((r) => r.status === 'attended');
     for (const reg of attendedRegs) {
+      if (!(await isEmployeeActive(reg.employeeID))) continue;
       await Notification.create({
         employeeID: reg.employeeID,
         type: 'evaluation',
@@ -1710,5 +1754,409 @@ router.delete('/articles/:id', authMiddleware, async (req, res, next) => {
   }
 });
 
+
+// ===================== Attendance Import (Excel) =====================
+
+const importUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    if (ext === '.xlsx' || ext === '.xls') return cb(null, true);
+    cb(new Error('Only .xlsx or .xls files are allowed.'));
+  },
+});
+
+const IMPORT_HEADERS = [
+  'Employee Email',
+  'Seminar Title',
+  'Date Attended (YYYY-MM-DD)',
+  'Evaluation Completed (yes/no)',
+  'Notes (optional)',
+];
+
+// ExcelJS returns cell.value as different shapes depending on cell type:
+//   string -> 'foo'
+//   number -> 123
+//   date   -> Date instance
+//   hyperlink (e.g. auto-converted email) -> { text: 'foo', hyperlink: 'mailto:...' }
+//   formula -> { formula, result }
+//   rich text -> { richText: [{ text: '...' }, ...] }
+// Normalize all of these to a plain string.
+const cellToString = (value) => {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? '' : value.toISOString().slice(0, 10);
+  }
+  if (typeof value === 'object') {
+    if (Array.isArray(value.richText)) {
+      return value.richText.map((rt) => rt?.text || '').join('');
+    }
+    if (value.text !== undefined) return String(value.text);
+    if (value.hyperlink !== undefined) {
+      return String(value.hyperlink).replace(/^mailto:/i, '');
+    }
+    if (value.result !== undefined) return cellToString(value.result);
+    if (value.formula !== undefined) return '';
+    return '';
+  }
+  return String(value);
+};
+
+const parseYesNo = (value) => {
+  const s = cellToString(value).trim().toLowerCase();
+  if (!s) return false;
+  return ['yes', 'y', 'true', '1', 'completed', 'done'].includes(s);
+};
+
+// Excel date serial -> JS Date. Excel epoch is 1899-12-30 (accounts for the
+// 1900 leap-year bug). Values >= 60 use the same offset.
+const excelSerialToDate = (serial) => {
+  if (!Number.isFinite(serial)) return null;
+  const ms = Math.round(serial * 86400 * 1000);
+  const epoch = Date.UTC(1899, 11, 30);
+  const d = new Date(epoch + ms);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+const parseImportDate = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  // Plain number = Excel date serial.
+  if (typeof value === 'number') return excelSerialToDate(value);
+  // Hyperlink/formula/etc — collapse via cellToString first.
+  const s = (typeof value === 'object' ? cellToString(value) : String(value)).trim();
+  if (!s) return null;
+  const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (ymd) {
+    const d = new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  // Numeric-string serial (e.g. "46158")
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const serial = Number(s);
+    if (serial > 59 && serial < 200000) return excelSerialToDate(serial);
+  }
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+// Build the .xlsx template with current employees/seminars baked in as a
+// reference sheet so fillers can copy exact values.
+router.get('/attendance-import/template.xlsx', authMiddleware, async (req, res, next) => {
+  try {
+    const [employees, seminars] = await Promise.all([
+      Employee.find({ accountStatus: { $ne: 'deactivated' }, role: 'employee' })
+        .select('name email department')
+        .sort({ name: 1 }),
+      Seminar.find({ isDeleted: { $ne: true } })
+        .select('title date')
+        .sort({ date: -1 }),
+    ]);
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'GIMS';
+    wb.created = new Date();
+
+    const ws = wb.addWorksheet('Attendance');
+    ws.columns = [
+      { header: IMPORT_HEADERS[0], key: 'email', width: 36 },
+      { header: IMPORT_HEADERS[1], key: 'title', width: 44 },
+      { header: IMPORT_HEADERS[2], key: 'date', width: 28 },
+      { header: IMPORT_HEADERS[3], key: 'eval', width: 30 },
+      { header: IMPORT_HEADERS[4], key: 'notes', width: 32 },
+    ];
+
+    // Header row: dark blue background, white bold text, wrapped, taller row.
+    const headerRow = ws.getRow(1);
+    headerRow.height = 34;
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF1F3C77' },
+      };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.border = {
+        bottom: { style: 'thin', color: { argb: 'FF1F3C77' } },
+      };
+    });
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+    // Force the date column to TEXT format so Excel keeps "2026-04-15" as
+    // typed, instead of converting it to a serial number that displays
+    // as 4/15/2026 (and parses oddly on import).
+    ws.getColumn(3).numFmt = '@';
+    ws.getColumn(3).alignment = { horizontal: 'left' };
+
+    // Sample/comment row (row 2) — grey + italic so fillers know to overwrite.
+    const sample = ws.addRow({
+      email: 'juan.delacruz@xu.edu.ph',
+      title: 'Exact seminar title as in GIMS',
+      date: '2026-04-15',
+      eval: 'yes',
+      notes: 'Sample row — replace or delete before uploading',
+    });
+    sample.eachCell((cell) => {
+      cell.font = { italic: true, color: { argb: 'FF888888' } };
+    });
+    // Ensure the date cell in the sample row is text, too.
+    sample.getCell(3).numFmt = '@';
+
+    // Add blank rows ready to fill, with the date column pre-set to text.
+    for (let i = 0; i < 20; i += 1) {
+      const r = ws.addRow({});
+      r.getCell(3).numFmt = '@';
+    }
+
+    // Reference sheet with valid emails and seminar titles
+    const ref = wb.addWorksheet('Reference');
+    ref.columns = [
+      { header: 'Valid Employee Emails', key: 'email', width: 36 },
+      { header: 'Employee Name', key: 'name', width: 28 },
+      { header: 'Valid Seminar Titles', key: 'title', width: 48 },
+      { header: 'Seminar Date', key: 'date', width: 18 },
+    ];
+    ref.getRow(1).font = { bold: true };
+    const maxRows = Math.max(employees.length, seminars.length);
+    for (let i = 0; i < maxRows; i += 1) {
+      ref.addRow({
+        email: employees[i]?.email || '',
+        name: employees[i]?.name || '',
+        title: seminars[i]?.title || '',
+        date: seminars[i]?.date ? new Date(seminars[i].date).toISOString().slice(0, 10) : '',
+      });
+    }
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="GIMS-Attendance-Import-Template-${new Date().toISOString().slice(0, 10)}.xlsx"`
+    );
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Parse the uploaded workbook into validated rows. Does NOT write to the DB.
+const parseImportWorkbook = async (buffer) => {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer);
+  const ws = wb.getWorksheet('Attendance') || wb.worksheets[0];
+  if (!ws) throw new Error('Workbook has no readable sheet.');
+
+  const rows = [];
+  const seenHeader = [];
+  ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) {
+      row.eachCell((cell, col) => { seenHeader[col] = String(cell.value || '').trim(); });
+      return;
+    }
+    const email = cellToString(row.getCell(1).value).trim().toLowerCase();
+    const title = cellToString(row.getCell(2).value).trim();
+    const dateCell = row.getCell(3).value;
+    const evalCell = row.getCell(4).value;
+    const notes = cellToString(row.getCell(5).value).trim();
+
+    if (!email && !title && !dateCell) return;
+
+    rows.push({
+      rowNumber,
+      email,
+      title,
+      dateRaw: dateCell,
+      evalRaw: evalCell,
+      notes,
+    });
+  });
+
+  return rows;
+};
+
+// Validate parsed rows against the current DB. Returns ok/error rows.
+const validateImportRows = async (parsedRows) => {
+  const emails = [...new Set(parsedRows.map((r) => r.email).filter(Boolean))];
+  const titles = [...new Set(parsedRows.map((r) => r.title).filter(Boolean))];
+
+  const [employees, seminars] = await Promise.all([
+    Employee.find({ email: { $in: emails } }),
+    Seminar.find({ title: { $in: titles }, isDeleted: { $ne: true } }),
+  ]);
+
+  const empByEmail = new Map(employees.map((e) => [String(e.email).toLowerCase(), e]));
+  const semByTitle = new Map(seminars.map((s) => [s.title, s]));
+
+  const ok = [];
+  const errors = [];
+
+  for (const r of parsedRows) {
+    const issues = [];
+    if (!r.email) issues.push('Missing employee email');
+    if (!r.title) issues.push('Missing seminar title');
+    const date = parseImportDate(r.dateRaw);
+    if (!date && r.dateRaw) issues.push('Date must be YYYY-MM-DD');
+
+    const employee = r.email ? empByEmail.get(r.email) : null;
+    const seminar = r.title ? semByTitle.get(r.title) : null;
+    if (r.email && !employee) issues.push(`Employee "${r.email}" not found`);
+    if (r.title && !seminar) issues.push(`Seminar "${r.title}" not found`);
+    if (employee && employee.accountStatus === 'deactivated') {
+      issues.push('Employee account is deactivated');
+    }
+
+    if (issues.length) {
+      errors.push({
+        rowNumber: r.rowNumber,
+        email: r.email,
+        title: r.title,
+        dateAttended: date ? date.toISOString().slice(0, 10) : '',
+        evaluationCompleted: parseYesNo(r.evalRaw),
+        notes: r.notes,
+        issues,
+      });
+    } else {
+      ok.push({
+        rowNumber: r.rowNumber,
+        email: r.email,
+        title: r.title,
+        dateAttended: date ? date.toISOString().slice(0, 10) : '',
+        evaluationCompleted: parseYesNo(r.evalRaw),
+        notes: r.notes,
+        employeeId: employee._id,
+        seminarId: seminar._id,
+      });
+    }
+  }
+
+  return { ok, errors };
+};
+
+// Preview only — parses + validates without saving.
+router.post(
+  '/attendance-import/preview',
+  authMiddleware,
+  importUpload.single('file'),
+  async (req, res, next) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: 'No file uploaded.' });
+      const parsed = await parseImportWorkbook(req.file.buffer);
+      if (!parsed.length) {
+        return res.status(400).json({ message: 'Workbook contains no data rows.' });
+      }
+      const { ok, errors } = await validateImportRows(parsed);
+      res.json({
+        totalRows: parsed.length,
+        validCount: ok.length,
+        errorCount: errors.length,
+        valid: ok.map(({ employeeId, seminarId, ...rest }) => rest),
+        errors,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// Commit — parses + validates + writes to DB. Optional certificate issuance.
+router.post(
+  '/attendance-import/commit',
+  authMiddleware,
+  importUpload.single('file'),
+  async (req, res, next) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: 'No file uploaded.' });
+      const issueCerts =
+        req.body?.issueCertificates === 'true' || req.body?.issueCertificates === true;
+
+      const parsed = await parseImportWorkbook(req.file.buffer);
+      if (!parsed.length) {
+        return res.status(400).json({ message: 'Workbook contains no data rows.' });
+      }
+      const { ok, errors } = await validateImportRows(parsed);
+
+      let imported = 0;
+      let certificatesIssued = 0;
+      const affectedEmployees = new Set();
+
+      for (const row of ok) {
+        let registration = await Registration.findOne({
+          seminarID: row.seminarId,
+          employeeID: row.employeeId,
+        });
+        if (!registration) {
+          registration = await Registration.create({
+            seminarID: row.seminarId,
+            employeeID: row.employeeId,
+            status: 'attended',
+            evaluationAvailable: true,
+            evaluationCompleted: row.evaluationCompleted,
+          });
+        } else {
+          registration.status = 'attended';
+          registration.evaluationAvailable = true;
+          if (row.evaluationCompleted) registration.evaluationCompleted = true;
+          await registration.save();
+        }
+
+        await Employee.updateOne(
+          { _id: row.employeeId },
+          { $addToSet: { seminarsAttended: row.seminarId } }
+        );
+        affectedEmployees.add(String(row.employeeId));
+        imported += 1;
+
+        if (issueCerts) {
+          const seminar = await Seminar.findById(row.seminarId);
+          const employee = await Employee.findById(row.employeeId);
+          if (seminar && employee) {
+            const before = Boolean(registration.certificateIssued);
+            await issueCertificateForRegistration({
+              registration,
+              seminar,
+              employee,
+              Notification,
+            });
+            if (!before && registration.certificateIssued) certificatesIssued += 1;
+          }
+        }
+      }
+
+      try {
+        await MaintenanceLog.create({
+          action: 'attendance-import',
+          schoolYear: currentSchoolYear() || 'unknown',
+          triggeredBy: req.user?.id,
+          triggeredByEmail: req.user?.email,
+          counts: {
+            registrationsArchived: 0,
+            seminarsArchived: 0,
+            employeesAffected: affectedEmployees.size,
+            registrationsRestored: imported,
+            seminarsRestored: certificatesIssued,
+          },
+          notes: `Attendance import: ${imported} rows imported, ${errors.length} skipped, ${certificatesIssued} certificates issued.`,
+        });
+      } catch (logErr) {
+        console.error('Failed to write attendance-import maintenance log:', logErr.message);
+      }
+
+      res.json({
+        message: `Imported ${imported} attendance record(s).`,
+        imported,
+        skipped: errors.length,
+        certificatesIssued,
+        errors,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 export default router;
