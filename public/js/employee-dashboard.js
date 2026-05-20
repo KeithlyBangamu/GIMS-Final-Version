@@ -182,19 +182,37 @@ document.addEventListener('DOMContentLoaded', () => {
     return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' });
   };
 
-  /** Compact list of every session (date • time) for multi-day seminars; optional highlight for pick-one / chosen day. */
+  /** Local calendar day key YYYY-MM-DD for matching a card’s “Pre-Register for &lt;date&gt;” to a session row. */
+  const toLocalDateKey = (date) => {
+    if (!date) return '';
+    const d = new Date(date);
+    if (Number.isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  /** Compact list of every session (date • time) for multi-day seminars; optional bold for pick-one / chosen day row. */
   const buildSessionsScheduleBlock = (sessions, opts = {}) => {
     if (!Array.isArray(sessions) || sessions.length <= 1) return '';
     const highlightId = opts.highlightSessionId != null ? String(opts.highlightSessionId) : '';
+    const highlightDateKey = opts.highlightDateKey != null ? String(opts.highlightDateKey) : '';
     const label = opts.label || 'All sessions';
     const items = sessions.map((sess, idx) => {
       const sid = String(sess._id || sess.id || '');
+      const sessKey = toLocalDateKey(sess.date);
+      const isBoldRow =
+        (highlightId && sid && sid === highlightId) ||
+        (highlightDateKey && sessKey && sessKey === highlightDateKey);
       const line = `Day ${idx + 1}: ${formatSeminarDate(sess.date)} • ${formatTime(sess.startTime)}`;
-      const isHi = highlightId && sid === highlightId;
-      const weight = isHi ? '650' : '400';
-      const opacity = isHi ? '1' : '0.9';
-      const tag = isHi ? ' <span style="font-size:0.62rem; font-weight:500;">(this session)</span>' : '';
-      return `<div class="muted small" style="font-size:0.68rem; margin-top:0.14rem; line-height:1.25; font-weight:${weight}; opacity:${opacity}; letter-spacing:-0.01em;">${escapeHtml(line)}${tag}</div>`;
+      const tag = isBoldRow
+        ? ` <strong style="font-size:0.62rem; font-weight:700;">(this session)</strong>`
+        : '';
+      const lineHtml = isBoldRow
+        ? `<strong style="font-weight:700;">${escapeHtml(line)}</strong>${tag}`
+        : escapeHtml(line);
+      return `<div class="muted small" style="font-size:0.68rem; margin-top:0.14rem; line-height:1.25; letter-spacing:-0.01em; opacity:0.9;">${lineHtml}</div>`;
     });
     return `
       <div class="seminar-sessions-schedule" style="margin-top:0.4rem; padding-top:0.4rem; border-top:1px solid rgba(15,23,42,0.08);">
@@ -205,8 +223,108 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const truncate = (text, max = 120) => {
     const s = String(text || '');
-    if (s.length <= max) return s;
-    return s.slice(0, max).trimEnd() + '…';
+    if (s.length > max) return s.slice(0, max).trimEnd() + '…';
+    return s;
+  };
+
+  const wireJoinedSeminarDescriptionToggles = (root) => {
+    if (!root) return;
+    root.querySelectorAll('.joined-seminar-desc-block').forEach((block) => {
+      const view = block.querySelector('.joined-seminar-desc-view');
+      const mask = block.querySelector('.joined-seminar-description-mask');
+      const btn = block.querySelector('.joined-seminar-desc-chevron-btn');
+      if (!view || !mask || !btn) return;
+
+      const setExpanded = (open) => {
+        view.classList.toggle('joined-seminar-description--expanded', open);
+        view.classList.toggle('joined-seminar-description--collapsed', !open);
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        btn.setAttribute('aria-label', open ? 'Collapse description' : 'Expand description');
+        if (open) mask.scrollTop = 0;
+      };
+
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = !view.classList.contains('joined-seminar-description--expanded');
+        setExpanded(open);
+      });
+
+      mask.addEventListener('click', () => {
+        if (view.classList.contains('joined-seminar-description--collapsed')) setExpanded(true);
+      });
+    });
+  };
+
+  /** Max collapsed preview height (px). Long descriptions stay truncated until expanded. */
+  const DESC_COLLAPSED_PREVIEW_CAP_PX = 84;
+
+  /** Pixels available for description text before chevron (flex region or space above actions). */
+  const resolveDescMeasureBudgetPx = (wrap) => {
+    const upcomingHost = wrap.closest('.seminar-card-desc-inner');
+    if (upcomingHost && upcomingHost.clientHeight > 48) {
+      return Math.floor(upcomingHost.clientHeight);
+    }
+    const card = wrap.closest('.joined-seminar-card');
+    const actions = card?.querySelector('.joined-seminar-actions');
+    if (card && actions) {
+      const top = wrap.getBoundingClientRect().top;
+      const limit = actions.getBoundingClientRect().top;
+      const gap = Math.floor(limit - top - 8);
+      if (gap > 56) return gap;
+    }
+    return 0;
+  };
+
+  const buildExpandableDescriptionMarkup = (descHtml, innerStyle = 'margin:0;', collapsedMaxPx = 0) => {
+    const maskClamp = collapsedMaxPx > 0 ? `max-height:${collapsedMaxPx}px;` : '';
+    return `
+      <div class="joined-seminar-desc-block">
+        <div class="joined-seminar-desc-view joined-seminar-description--collapsed">
+          <div class="joined-seminar-description-mask" style="${maskClamp}">
+            <p class="muted small joined-seminar-description" style="${innerStyle}">${descHtml}</p>
+          </div>
+          <button type="button" class="joined-seminar-desc-chevron-btn" aria-expanded="false" aria-label="Expand description">
+            <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+          </button>
+        </div>
+      </div>
+    `;
+  };
+
+  /** Renders a measure pass; call {@link finalizeSeminarDescriptionAutowrap} after layout. */
+  const buildAttendedDescriptionHtml = (rawDesc) => {
+    const desc = String(rawDesc || '').trim();
+    if (!desc) return '<p class="muted small joined-seminar-description">—</p>';
+    const descHtml = escapeHtml(desc);
+    return `
+      <div class="joined-seminar-desc-autowrap" data-desc-autowrap>
+        <div class="joined-seminar-desc-measure-clip">
+          <p class="muted small joined-seminar-description joined-seminar-desc-measure-txt" style="margin:0;">${descHtml}</p>
+        </div>
+      </div>
+    `;
+  };
+
+  const finalizeSeminarDescriptionAutowrap = (root) => {
+    if (!root) return;
+    Array.from(root.querySelectorAll('[data-desc-autowrap]')).forEach((wrap) => {
+      const clip = wrap.querySelector('.joined-seminar-desc-measure-clip');
+      const p = clip?.querySelector('.joined-seminar-desc-measure-txt');
+      if (!clip || !p) return;
+      const budgetPx = resolveDescMeasureBudgetPx(wrap);
+      const previewPx =
+        budgetPx > 0 ? Math.min(budgetPx, DESC_COLLAPSED_PREVIEW_CAP_PX) : DESC_COLLAPSED_PREVIEW_CAP_PX;
+      clip.style.maxHeight = `${previewPx}px`;
+      void clip.offsetHeight;
+      const fullText = p.textContent ?? '';
+      const needsExpand = clip.scrollHeight > clip.clientHeight + 1;
+      const descHtml = escapeHtml(fullText);
+      if (needsExpand) {
+        wrap.outerHTML = buildExpandableDescriptionMarkup(descHtml, 'margin:0;', previewPx);
+      } else {
+        wrap.outerHTML = `<p class="muted small joined-seminar-description" style="margin:0;">${descHtml}</p>`;
+      }
+    });
   };
 
   const timeAgo = (dateStr) => {
@@ -534,7 +652,6 @@ document.addEventListener('DOMContentLoaded', () => {
         s.sessions.forEach((sess, idx) => {
           if (sess.isHeld) return;
           const mandatoryLabel = s.mandatory ? 'Mandatory' : 'Optional';
-          const shortDesc = truncate(s.description, 110);
           const capacity = Number(s.capacity || 0);
           const remaining = Number(s.remainingCapacity || 0);
           const joined = Math.max(0, capacity - remaining);
@@ -542,29 +659,37 @@ document.addEventListener('DOMContentLoaded', () => {
           const dayLabel = `Day ${idx + 1} of ${s.sessions.length}`;
 
           cards.push(`
-            <div class="card seminar-card" style="box-shadow:none; padding: 1rem; min-width: 290px; flex: 0 0 290px; display:flex; flex-direction:column; justify-content:space-between;">
-              <div style="display:flex; align-items:flex-start; gap: 0.8rem;">
-                <div style="width:36px; height:36px; border-radius:10px; background: rgba(32,58,115,0.12); display:flex; align-items:center; justify-content:center; color: var(--xu-blue);">
-                  <i class="fa-solid fa-chalkboard-user"></i>
-                </div>
-                <div style="flex:1;">
-                  <div style="font-weight:600; color: var(--xu-blue);">${escapeHtml(s.title)}</div>
-                  <div class="muted small" style="margin-top:0.2rem; font-size:0.83rem; font-weight:600; color:var(--text);">
-                    ${escapeHtml(formatSeminarDate(sess.date))} &bull; ${escapeHtml(formatTime(sess.startTime))}
+            <div class="card seminar-card seminar-card--stack" style="box-shadow:none; padding: 1rem; min-width: 290px; flex: 0 0 290px;">
+              <div class="seminar-card-top">
+                <div style="display:flex; align-items:flex-start; gap: 0.8rem;">
+                  <div style="width:36px; height:36px; border-radius:10px; background: rgba(32,58,115,0.12); display:flex; align-items:center; justify-content:center; color: var(--xu-blue);">
+                    <i class="fa-solid fa-chalkboard-user"></i>
                   </div>
-                  <div class="muted small" style="font-size:0.78rem; margin-top:0.1rem; opacity:0.72;">
-                    <i class="fa-solid fa-calendar-days" style="margin-right:0.25rem;"></i>Series: ${escapeHtml(seriesRange)}
+                  <div style="flex:1; min-width:0;">
+                    <div style="font-weight:600; color: var(--xu-blue);">${escapeHtml(s.title)}</div>
+                    <div class="muted small" style="margin-top:0.2rem; font-size:0.83rem; font-weight:600; color:var(--text);">
+                      ${escapeHtml(formatSeminarDate(sess.date))} &bull; ${escapeHtml(formatTime(sess.startTime))}
+                    </div>
+                    <div class="muted small" style="font-size:0.78rem; margin-top:0.1rem; opacity:0.72;">
+                      <i class="fa-solid fa-calendar-days" style="margin-right:0.25rem;"></i>Series: ${escapeHtml(seriesRange)}
+                    </div>
+                    ${buildSessionsScheduleBlock(s.sessions, {
+                      highlightSessionId: sessionId,
+                      highlightDateKey: toLocalDateKey(sess.date),
+                      label: 'All session options',
+                    })}
                   </div>
-                  ${buildSessionsScheduleBlock(s.sessions, { highlightSessionId: sessionId, label: 'All session options' })}
                 </div>
               </div>
 
-              <div class="muted" style="margin-top: 0.7rem; font-size:0.92rem; line-height:1.4;">
-                ${escapeHtml(shortDesc)}
+              <div class="seminar-card-body-spacer">
+                <div class="seminar-card-desc-inner">
+                  ${buildAttendedDescriptionHtml(s.description)}
+                </div>
               </div>
 
-              <div style="margin-top: 0.75rem; display:flex; justify-content: space-between; align-items:center; gap: 0.75rem;">
-                <div style="display:flex; flex-wrap:wrap; gap:0.3rem; align-items:center;">
+              <div class="seminar-card-footer-row">
+                <div class="seminar-card-footer-badges">
                   <div class="badge badge-soft" style="background: rgba(32,58,115,0.08); color: var(--xu-blue); border-color: rgba(32,58,115,0.18);">
                     ${escapeHtml(mandatoryLabel)}
                   </div>
@@ -572,12 +697,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     ${escapeHtml(dayLabel)}
                   </div>
                 </div>
-                <div class="muted small" style="font-size:0.82rem;">
+                <div class="seminar-card-footer-slots muted small">
                   Slots: ${escapeHtml(String(joined))}/${escapeHtml(String(capacity))}
                 </div>
               </div>
 
-              <button class="btn pre-register-btn" style="margin-top: 0.9rem; width: 100%;"
+              <button class="btn pre-register-btn" style="margin-top: 0.75rem; width: 100%;"
                 data-join-id="${escapeHtml(s.id)}"
                 data-session-id="${escapeHtml(sessionId)}"
                 type="button">
@@ -589,7 +714,6 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         // Single-day or attend-all multi-day — one card
         const mandatoryLabel = s.mandatory ? 'Mandatory' : 'Optional';
-        const shortDesc = truncate(s.description, 110);
         const capacity = Number(s.capacity || 0);
         const remaining = Number(s.remainingCapacity || 0);
         const joined = Math.max(0, capacity - remaining);
@@ -612,38 +736,42 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         cards.push(`
-          <div class="card seminar-card" style="box-shadow:none; padding: 1rem; min-width: 290px; flex: 0 0 290px; display:flex; flex-direction:column; justify-content:space-between;">
-            <div style="display:flex; align-items:flex-start; gap: 0.8rem;">
-              <div style="width:36px; height:36px; border-radius:10px; background: rgba(32,58,115,0.12); display:flex; align-items:center; justify-content:center; color: var(--xu-blue);">
-                <i class="fa-solid fa-chalkboard-user"></i>
-              </div>
-              <div style="flex:1;">
-                <div style="font-weight:600; color: var(--xu-blue);">${escapeHtml(s.title)}</div>
-                <div class="muted small" style="margin-top:0.2rem; font-size:0.83rem;">${dateDisplay}</div>
-                ${s.location ? `<div class="muted small" style="font-size:0.82rem; margin-top:0.1rem;"><i class="fa-solid fa-location-dot" style="margin-right:0.25rem;"></i>${escapeHtml(s.location)}</div>` : ''}
-                ${s.resourcePerson ? `<div class="muted small" style="font-size:0.82rem; margin-top:0.1rem;"><i class="fa-solid fa-user" style="margin-right:0.25rem;"></i>${escapeHtml(s.resourcePerson)}</div>` : ''}
-                ${seriesLine}
-                ${sessionsScheduleHtml}
+          <div class="card seminar-card seminar-card--stack" style="box-shadow:none; padding: 1rem; min-width: 290px; flex: 0 0 290px;">
+            <div class="seminar-card-top">
+              <div style="display:flex; align-items:flex-start; gap: 0.8rem;">
+                <div style="width:36px; height:36px; border-radius:10px; background: rgba(32,58,115,0.12); display:flex; align-items:center; justify-content:center; color: var(--xu-blue);">
+                  <i class="fa-solid fa-chalkboard-user"></i>
+                </div>
+                <div style="flex:1; min-width:0;">
+                  <div style="font-weight:600; color: var(--xu-blue);">${escapeHtml(s.title)}</div>
+                  <div class="muted small" style="margin-top:0.2rem; font-size:0.83rem;">${dateDisplay}</div>
+                  ${s.location ? `<div class="muted small" style="font-size:0.82rem; margin-top:0.1rem;"><i class="fa-solid fa-location-dot" style="margin-right:0.25rem;"></i>${escapeHtml(s.location)}</div>` : ''}
+                  ${s.resourcePerson ? `<div class="muted small" style="font-size:0.82rem; margin-top:0.1rem;"><i class="fa-solid fa-user" style="margin-right:0.25rem;"></i>${escapeHtml(s.resourcePerson)}</div>` : ''}
+                  ${seriesLine}
+                  ${sessionsScheduleHtml}
+                </div>
               </div>
             </div>
 
-            <div class="muted" style="margin-top: 0.7rem; font-size:0.92rem; line-height:1.4;">
-              ${escapeHtml(shortDesc)}
+            <div class="seminar-card-body-spacer">
+              <div class="seminar-card-desc-inner">
+                ${buildAttendedDescriptionHtml(s.description)}
+              </div>
             </div>
 
-            <div style="margin-top: 0.75rem; display:flex; justify-content: space-between; align-items:center; gap: 0.75rem;">
-              <div style="display:flex; flex-wrap:wrap; gap:0.3rem; align-items:center;">
+            <div class="seminar-card-footer-row">
+              <div class="seminar-card-footer-badges">
                 <div class="badge badge-soft" style="background: rgba(32,58,115,0.08); color: var(--xu-blue); border-color: rgba(32,58,115,0.18);">
                   ${escapeHtml(mandatoryLabel)}
                 </div>
                 ${multiDayBadge}
               </div>
-              <div class="muted small" style="font-size:0.82rem;">
+              <div class="seminar-card-footer-slots muted small">
                 Slots: ${escapeHtml(String(joined))}/${escapeHtml(String(capacity))}
               </div>
             </div>
 
-            <button class="btn pre-register-btn" style="margin-top: 0.9rem; width: 100%;" data-join-id="${escapeHtml(s.id)}" type="button">
+            <button class="btn pre-register-btn" style="margin-top: 0.75rem; width: 100%;" data-join-id="${escapeHtml(s.id)}" type="button">
               Pre-Register
             </button>
           </div>
@@ -669,6 +797,11 @@ document.addEventListener('DOMContentLoaded', () => {
         openJoinModal({ seminar, joinActionId: seminarId, chosenSessionId: sessionId });
       });
     });
+    const runDescLayout = () => {
+      finalizeSeminarDescriptionAutowrap(el.upcomingCarousel);
+      wireJoinedSeminarDescriptionToggles(el.upcomingCarousel);
+    };
+    requestAnimationFrame(() => requestAnimationFrame(runDescLayout));
   };
 
   // ========================
@@ -699,6 +832,7 @@ document.addEventListener('DOMContentLoaded', () => {
         : '';
       const preRegSessionsBlock = buildSessionsScheduleBlock(s.sessions, {
         highlightSessionId: r.chosenSessionId || undefined,
+        highlightDateKey: chosenSess ? toLocalDateKey(chosenSess.date) : '',
         label: 'All sessions',
       });
 
@@ -761,6 +895,7 @@ document.addEventListener('DOMContentLoaded', () => {
         : '';
       const registeredSessionsBlock = buildSessionsScheduleBlock(s.sessions, {
         highlightSessionId: r.chosenSessionId || undefined,
+        highlightDateKey: chosenSess ? toLocalDateKey(chosenSess.date) : '',
         label: 'All sessions',
       });
 
@@ -950,54 +1085,8 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('pointerdown', attendedSortMenuCloseHandler, true);
   };
 
-  const ATTENDED_DESC_COLLAPSE_THRESHOLD = 120;
-
-  const buildAttendedDescriptionHtml = (rawDesc) => {
-    const desc = String(rawDesc || '').trim();
-    if (!desc) return '<p class="muted small joined-seminar-description">—</p>';
-    const descHtml = escapeHtml(desc);
-    if (desc.length <= ATTENDED_DESC_COLLAPSE_THRESHOLD) {
-      return `<p class="muted small joined-seminar-description">${descHtml}</p>`;
-    }
-    return `
-      <div class="joined-seminar-desc-block">
-        <div class="joined-seminar-desc-view joined-seminar-description--collapsed">
-          <div class="joined-seminar-description-mask">
-            <p class="muted small joined-seminar-description" style="margin:0;">${descHtml}</p>
-          </div>
-          <button type="button" class="joined-seminar-desc-chevron-btn" aria-expanded="false" aria-label="Expand description">
-            <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
-          </button>
-        </div>
-      </div>
-    `;
-  };
-
   const wireAttendedDescriptionToggles = () => {
-    if (!el.attendedSeminarsList) return;
-    el.attendedSeminarsList.querySelectorAll('.joined-seminar-desc-block').forEach((block) => {
-      const view = block.querySelector('.joined-seminar-desc-view');
-      const mask = block.querySelector('.joined-seminar-description-mask');
-      const btn = block.querySelector('.joined-seminar-desc-chevron-btn');
-      if (!view || !mask || !btn) return;
-
-      const setExpanded = (open) => {
-        view.classList.toggle('joined-seminar-description--expanded', open);
-        view.classList.toggle('joined-seminar-description--collapsed', !open);
-        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-        btn.setAttribute('aria-label', open ? 'Collapse description' : 'Expand description');
-      };
-
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const open = !view.classList.contains('joined-seminar-description--expanded');
-        setExpanded(open);
-      });
-
-      mask.addEventListener('click', () => {
-        if (view.classList.contains('joined-seminar-description--collapsed')) setExpanded(true);
-      });
-    });
+    wireJoinedSeminarDescriptionToggles(el.attendedSeminarsList);
   };
 
   const renderAttendedSeminars = (attendedSeminars) => {
@@ -1015,8 +1104,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const canEval = r.evaluationAvailable && !r.evaluationCompleted;
         const evalDone = r.evaluationCompleted;
         const attendedChosen = r.chosenSessionId || null;
+        const attendedChosenSess =
+          attendedChosen && Array.isArray(s.sessions)
+            ? s.sessions.find((sess) => String(sess._id || sess.id || '') === String(attendedChosen))
+            : null;
         const attendedSessionsBlock = buildSessionsScheduleBlock(s.sessions, {
           highlightSessionId: attendedChosen || undefined,
+          highlightDateKey: attendedChosenSess ? toLocalDateKey(attendedChosenSess.date) : '',
           label: 'Sessions',
         });
 
@@ -1155,7 +1249,11 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
-    wireAttendedDescriptionToggles();
+    const runAttendedDescLayout = () => {
+      finalizeSeminarDescriptionAutowrap(el.attendedSeminarsList);
+      wireAttendedDescriptionToggles();
+    };
+    requestAnimationFrame(() => requestAnimationFrame(runAttendedDescLayout));
     applyAttendedViewMode();
   };
 

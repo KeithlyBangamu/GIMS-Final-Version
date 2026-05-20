@@ -285,6 +285,18 @@
       .joined-seminar-desc-block {
         margin: 0;
       }
+      .joined-seminar-desc-autowrap {
+        min-width: 0;
+      }
+      .joined-seminar-desc-measure-clip {
+        max-height: 4.35em;
+        overflow: hidden;
+        position: relative;
+        border-radius: 0.35rem;
+      }
+      .joined-seminar-desc-measure-txt {
+        white-space: pre-line;
+      }
       .joined-seminar-desc-view.joined-seminar-description--collapsed .joined-seminar-description-mask {
         max-height: 4.35em;
         overflow: hidden;
@@ -334,6 +346,89 @@
       }
       .joined-seminar-desc-view.joined-seminar-description--expanded .joined-seminar-desc-chevron-btn i {
         transform: rotate(180deg);
+      }
+
+      /* Upcoming (Open / Mandatory): middle description scrolls; badges + slots stay above Pre-Register */
+      #upcoming-carousel .seminar-card.seminar-card--stack {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: flex-start;
+        min-height: 19rem;
+      }
+      #upcoming-carousel .seminar-card.seminar-card--stack .seminar-card-top {
+        flex-shrink: 0;
+      }
+      #upcoming-carousel .seminar-card.seminar-card--stack .seminar-card-body-spacer {
+        flex: 1 1 auto;
+        min-height: 0;
+        margin-top: 0.65rem;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      #upcoming-carousel .seminar-card.seminar-card--stack .seminar-card-desc-inner {
+        flex: 1 1 auto;
+        min-height: 0;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      #upcoming-carousel .seminar-card.seminar-card--stack .seminar-card-desc-inner .joined-seminar-desc-block {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      #upcoming-carousel .seminar-card.seminar-card--stack .joined-seminar-desc-view {
+        flex: 1 1 auto;
+        min-height: 0;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      #upcoming-carousel .seminar-card.seminar-card--stack .joined-seminar-desc-view.joined-seminar-description--expanded .joined-seminar-description-mask {
+        flex: 1 1 auto;
+        min-height: 0;
+        max-height: none !important;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      #upcoming-carousel .seminar-card.seminar-card--stack .joined-seminar-desc-view.joined-seminar-description--collapsed .joined-seminar-description-mask {
+        flex: 0 0 auto;
+      }
+      #upcoming-carousel .seminar-card.seminar-card--stack .seminar-card-footer-row {
+        flex-shrink: 0;
+        margin-top: auto;
+        padding-top: 0.65rem;
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.45rem;
+        min-width: 0;
+      }
+      #upcoming-carousel .seminar-card.seminar-card--stack .seminar-card-footer-badges {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 0.35rem;
+        min-width: 0;
+      }
+      #upcoming-carousel .seminar-card.seminar-card--stack .seminar-card-footer-badges .badge-soft {
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      #upcoming-carousel .seminar-card.seminar-card--stack .seminar-card-footer-slots {
+        white-space: nowrap;
+        flex-shrink: 0;
+        font-size: 0.78rem;
+        text-align: right;
       }
     </style>
   </head>
