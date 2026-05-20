@@ -27,3 +27,7 @@ Thumbs.db
 # Runtime user uploads (do not commit user-uploaded content)
 public/uploads/*
 !public/uploads/.gitkeep
+
+# Google Drive service-account key (NEVER commit credentials)
+gims-drive-key.json
+*-drive-key.json

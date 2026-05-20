@@ -770,6 +770,29 @@
                 <p class="status" id="snapshot-status" style="margin-top:0.6rem;"></p>
               </div>
 
+              <div class="card" style="margin-top:1rem;">
+                <h2 style="margin-top:0;">Google Drive Snapshot (Off-site Backup)</h2>
+                <p class="muted">
+                  A full CSV of the GIMS database uploaded to your shared Google Drive folder.
+                  Runs automatically every day at 02:00 (Manila time). Use this button to upload a snapshot now.
+                  Old backups beyond the retention window are pruned automatically.
+                </p>
+
+                <div id="drive-backup-status-box" style="margin-top:0.75rem; padding:0.85rem 1rem; border-radius:0.6rem; border:1px solid var(--border); background:rgba(32,58,115,0.04);">
+                  <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+                    <strong>Last Drive backup:</strong>
+                    <span id="drive-backup-last-time">—</span>
+                    <span class="muted small" id="drive-backup-last-meta"></span>
+                  </div>
+                </div>
+
+                <div style="display:flex; gap:0.6rem; flex-wrap:wrap; margin-top:0.9rem;">
+                  <button class="btn" id="drive-backup-run-btn" type="button">Upload to Drive Now</button>
+                  <a class="btn secondary" id="drive-backup-open-link" href="#" target="_blank" rel="noopener" style="display:none;">Open Latest in Drive</a>
+                </div>
+                <p class="status" id="drive-backup-status" style="margin-top:0.6rem;"></p>
+              </div>
+
               <div class="card maint-danger-card" style="margin-top:1.25rem;">
                 <div class="maint-danger-badge">Danger Zone</div>
                 <h2 style="margin-top:0.6rem;">End of School Year Reset</h2>

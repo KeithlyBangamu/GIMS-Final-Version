@@ -21,6 +21,8 @@ import {
   getSnapshotStatus,
   BACKUP_DATABASE_NAME,
 } from '../services/backupDatabaseService.js';
+import { runDriveBackupNow } from '../services/driveBackupScheduler.js';
+import { getLatestDriveBackup } from '../services/driveBackupService.js';
 
 const router = express.Router();
 
@@ -1097,6 +1099,29 @@ router.post('/weekly-export/confirm', authMiddleware, async (req, res, next) => 
     res.json({ message: 'Weekly backup confirmed. Thank you.', confirmedAt: new Date() });
   } catch (err) {
     next(err);
+  }
+});
+
+// Manual trigger for the Google Drive backup. Useful for testing without
+// waiting for the scheduled run.
+router.post('/drive-backup/run', authMiddleware, async (req, res, next) => {
+  try {
+    const result = await runDriveBackupNow();
+    res.json({
+      message: 'Backup uploaded to Google Drive.',
+      ...result,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/drive-backup/status', authMiddleware, async (req, res, next) => {
+  try {
+    const status = await getLatestDriveBackup();
+    res.json(status);
+  } catch (err) {
+    res.status(200).json({ configured: true, error: err.message });
   }
 });
 

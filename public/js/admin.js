@@ -3811,6 +3811,107 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load initial snapshot status when the maintenance section is opened.
   refreshSnapshotStatus().catch(() => {});
 
+  // ============== Google Drive Snapshot ==============
+  const driveBackupRunBtn = document.getElementById('drive-backup-run-btn');
+  const driveBackupStatus = document.getElementById('drive-backup-status');
+  const driveBackupLastTime = document.getElementById('drive-backup-last-time');
+  const driveBackupLastMeta = document.getElementById('drive-backup-last-meta');
+  const driveBackupStatusBox = document.getElementById('drive-backup-status-box');
+  const driveBackupOpenLink = document.getElementById('drive-backup-open-link');
+
+  const renderDriveBackupStatus = (data) => {
+    if (!driveBackupLastTime) return;
+    if (!data?.configured) {
+      driveBackupLastTime.textContent = 'Not configured';
+      driveBackupLastTime.style.color = '#b45309';
+      if (driveBackupLastMeta) driveBackupLastMeta.textContent = '— set DRIVE_BACKUP_FOLDER_ID on the server';
+      if (driveBackupStatusBox) driveBackupStatusBox.style.background = 'rgba(245,158,11,0.10)';
+      if (driveBackupOpenLink) driveBackupOpenLink.style.display = 'none';
+      return;
+    }
+    if (data?.error) {
+      driveBackupLastTime.textContent = 'Error';
+      driveBackupLastTime.style.color = '#b91c1c';
+      if (driveBackupLastMeta) driveBackupLastMeta.textContent = data.error;
+      if (driveBackupStatusBox) driveBackupStatusBox.style.background = 'rgba(220,38,38,0.06)';
+      if (driveBackupOpenLink) driveBackupOpenLink.style.display = 'none';
+      return;
+    }
+    if (!data?.latest) {
+      driveBackupLastTime.textContent = 'No backup uploaded yet';
+      driveBackupLastTime.style.color = '#b45309';
+      if (driveBackupLastMeta) driveBackupLastMeta.textContent = '';
+      if (driveBackupStatusBox) driveBackupStatusBox.style.background = 'rgba(245,158,11,0.10)';
+      if (driveBackupOpenLink) driveBackupOpenLink.style.display = 'none';
+      return;
+    }
+    const when = new Date(data.latest.createdTime);
+    const ageMs = Date.now() - when.getTime();
+    const ageHours = Math.floor(ageMs / (60 * 60 * 1000));
+    const ageStr = ageHours < 1 ? 'just now' : ageHours < 24 ? `${ageHours}h ago` : `${Math.floor(ageHours / 24)}d ago`;
+    driveBackupLastTime.textContent = `${when.toLocaleString()} (${ageStr})`;
+    const isStale = ageHours >= 48;
+    driveBackupLastTime.style.color = isStale ? '#b91c1c' : '#059669';
+    if (driveBackupLastMeta) {
+      const sizeKb = data.latest.size ? `${Math.round(Number(data.latest.size) / 1024)} KB` : '';
+      driveBackupLastMeta.textContent = `• ${data.latest.name}${sizeKb ? ` • ${sizeKb}` : ''}`;
+    }
+    if (driveBackupStatusBox) {
+      driveBackupStatusBox.style.background = isStale ? 'rgba(220,38,38,0.06)' : 'rgba(16,185,129,0.06)';
+    }
+    if (driveBackupOpenLink) {
+      if (data.latest.webViewLink) {
+        driveBackupOpenLink.href = data.latest.webViewLink;
+        driveBackupOpenLink.style.display = '';
+      } else {
+        driveBackupOpenLink.style.display = 'none';
+      }
+    }
+  };
+
+  const refreshDriveBackupStatus = async () => {
+    try {
+      const res = await authedFetch('/api/admin/maintenance/drive-backup/status');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || 'Failed to load Drive backup status.');
+      renderDriveBackupStatus(data);
+      return data;
+    } catch (err) {
+      if (driveBackupStatus) driveBackupStatus.textContent = err.message || 'Failed to load Drive backup status.';
+      return null;
+    }
+  };
+
+  if (driveBackupRunBtn) {
+    driveBackupRunBtn.addEventListener('click', async () => {
+      if (!confirm('Upload a fresh database backup to Google Drive now? This may take a few seconds.')) return;
+      try {
+        driveBackupRunBtn.disabled = true;
+        if (driveBackupStatus) {
+          driveBackupStatus.style.color = '';
+          driveBackupStatus.textContent = 'Uploading to Google Drive…';
+        }
+        const res = await authedFetch('/api/admin/maintenance/drive-backup/run', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || 'Drive backup failed.');
+        if (driveBackupStatus) {
+          driveBackupStatus.style.color = '#059669';
+          driveBackupStatus.textContent = `Uploaded ${data.filename} (${data.collectionCount} collections). Pruned ${data.pruned || 0} old backup(s).`;
+        }
+        await refreshDriveBackupStatus();
+      } catch (err) {
+        if (driveBackupStatus) {
+          driveBackupStatus.style.color = '#b91c1c';
+          driveBackupStatus.textContent = err.message || 'Drive backup failed.';
+        }
+      } finally {
+        driveBackupRunBtn.disabled = false;
+      }
+    });
+  }
+
+  refreshDriveBackupStatus().catch(() => {});
+
   // ============== Record Past Seminar ==============
   const pastSeminarBtn = document.getElementById('admin-record-past-seminar-btn');
   const pastSeminarModal = document.getElementById('admin-record-past-seminar-modal');
