@@ -747,7 +747,30 @@
                 </div>
               </div>
 
-              <div class="card maint-danger-card" style="margin-top:1rem;">
+              <div class="card" style="margin-top:1rem;">
+                <h2 style="margin-top:0;">Database Snapshot (Backup)</h2>
+                <p class="muted">
+                  A full copy of the GIMS database, kept inside Atlas as <code>gims-backup</code>.
+                  Runs automatically every day at 02:00 (Manila time). Use these buttons to take a snapshot now,
+                  or to restore the live database from the most recent snapshot.
+                </p>
+
+                <div id="snapshot-status-box" style="margin-top:0.75rem; padding:0.85rem 1rem; border-radius:0.6rem; border:1px solid var(--border); background:rgba(32,58,115,0.04);">
+                  <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+                    <strong>Last snapshot:</strong>
+                    <span id="snapshot-last-time">—</span>
+                    <span class="muted small" id="snapshot-last-meta"></span>
+                  </div>
+                </div>
+
+                <div style="display:flex; gap:0.6rem; flex-wrap:wrap; margin-top:0.9rem;">
+                  <button class="btn" id="snapshot-run-btn" type="button">Snapshot Now</button>
+                  <button class="btn secondary" id="snapshot-restore-btn" type="button" style="border-color:#dc2626; color:#b91c1c;">Restore from Snapshot</button>
+                </div>
+                <p class="status" id="snapshot-status" style="margin-top:0.6rem;"></p>
+              </div>
+
+              <div class="card maint-danger-card" style="margin-top:1.25rem;">
                 <div class="maint-danger-badge">Danger Zone</div>
                 <h2 style="margin-top:0.6rem;">End of School Year Reset</h2>
                 <p class="muted">
@@ -811,29 +834,6 @@
                     </div>
                   </li>
                 </ol>
-              </div>
-
-              <div class="card" style="margin-top:1.25rem;">
-                <h2 style="margin-top:0;">Database Snapshot (Backup)</h2>
-                <p class="muted">
-                  A full copy of the GIMS database, kept inside Atlas as <code>gims-backup</code>.
-                  Runs automatically every day at 02:00 (Manila time). Use these buttons to take a snapshot now,
-                  or to restore the live database from the most recent snapshot.
-                </p>
-
-                <div id="snapshot-status-box" style="margin-top:0.75rem; padding:0.85rem 1rem; border-radius:0.6rem; border:1px solid var(--border); background:rgba(32,58,115,0.04);">
-                  <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
-                    <strong>Last snapshot:</strong>
-                    <span id="snapshot-last-time">—</span>
-                    <span class="muted small" id="snapshot-last-meta"></span>
-                  </div>
-                </div>
-
-                <div style="display:flex; gap:0.6rem; flex-wrap:wrap; margin-top:0.9rem;">
-                  <button class="btn" id="snapshot-run-btn" type="button">Snapshot Now</button>
-                  <button class="btn secondary" id="snapshot-restore-btn" type="button" style="border-color:#dc2626; color:#b91c1c;">Restore from Snapshot</button>
-                </div>
-                <p class="status" id="snapshot-status" style="margin-top:0.6rem;"></p>
               </div>
 
               <div class="card" style="margin-top:1.25rem;">
