@@ -1976,13 +1976,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Update attendance buttons
       if (seminarHeldBtn) {
-        const elapsed = hasSeminarTimeElapsed(seminar);
-        const blocked = !isHeld && !elapsed;
-        seminarHeldBtn.disabled = blocked;
+        seminarHeldBtn.disabled = false;
         seminarHeldBtn.textContent = isHeld ? 'Unmark Held' : 'Mark as Held';
-        seminarHeldBtn.title = blocked
-          ? `Available once the seminar starts (${formatSeminarStart(seminar)}).`
-          : '';
+        seminarHeldBtn.title = '';
       }
       if (markAttendanceBtn) markAttendanceBtn.disabled = !isHeld;
       if (sendCertificatesBtn) sendCertificatesBtn.disabled = !isHeld || !attendanceModalState.attendanceSaved;
@@ -2053,14 +2049,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             <div style="${actionGroupStyle}">
               <button class="btn secondary" type="button" data-seminar-view="${seminar._id}" style="${wideButtonStyle}">View Participants</button>
-              ${(() => {
-                const elapsed = hasSeminarTimeElapsed(seminar);
-                const disable = !seminar.isHeld && !elapsed;
-                const title = disable
-                  ? `Available once the seminar starts (${formatSeminarStart(seminar)}).`
-                  : '';
-                return `<button class="btn secondary" type="button" data-seminar-held="${seminar._id}" style="${wideButtonStyle}" ${disable ? 'disabled aria-disabled="true"' : ''} title="${escapeHtml(title)}">${seminar.isHeld ? 'Unmark Held' : 'Mark as Held'}</button>`;
-              })()}
+              <button class="btn secondary" type="button" data-seminar-held="${seminar._id}" style="${wideButtonStyle}">${seminar.isHeld ? 'Unmark Held' : 'Mark as Held'}</button>
               <button class="btn secondary" type="button" data-seminar-evals="${seminar._id}" style="${wideButtonStyle}">Evaluations</button>
               <button class="btn" type="button" data-seminar-edit="${seminar._id}" style="${shortButtonStyle}">Edit</button>
               <button class="btn secondary" type="button" data-seminar-delete="${seminar._id}" style="${shortButtonStyle}">Delete</button>
@@ -2098,12 +2087,6 @@ document.addEventListener('DOMContentLoaded', () => {
       button.addEventListener('click', async () => {
         const seminar = currentSeminars.find((item) => String(item._id) === String(button.getAttribute('data-seminar-held')));
         if (!seminar) return;
-        if (!seminar.isHeld && !hasSeminarTimeElapsed(seminar)) {
-          if (seminarsStatusEl) {
-            seminarsStatusEl.textContent = `Cannot mark as held yet — seminar starts ${formatSeminarStart(seminar)}.`;
-          }
-          return;
-        }
         try {
           const targetHeld = !seminar.isHeld;
           const res = await authedFetch(`/api/admin/seminars/${seminar._id}/held`, {
@@ -2780,13 +2763,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   seminarHeldBtn?.addEventListener('click', async () => {
     if (!attendanceModalState.seminarId) return;
-    const seminar = currentSeminars.find((item) => String(item._id) === String(attendanceModalState.seminarId));
-    if (seminar && !seminar.isHeld && !hasSeminarTimeElapsed(seminar)) {
-      if (seminarParticipantsStatusEl) {
-        seminarParticipantsStatusEl.textContent = `Cannot mark as held yet — seminar starts ${formatSeminarStart(seminar)}.`;
-      }
-      return;
-    }
     try {
       const targetHeld = !attendanceModalState.isHeld;
       const res = await authedFetch(`/api/admin/seminars/${attendanceModalState.seminarId}/held`, {
