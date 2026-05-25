@@ -372,15 +372,15 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   /**
-   * Returns the latest end-time (Date) for a seminar, or null if it cannot be
-   * determined. For multi-session seminars this is the end of the last session;
-   * for single-day seminars it's date + startTime + durationHours.
+   * Returns the earliest session start-time (Date) for a seminar, or null if it
+   * cannot be determined. Used to gate "Mark as Held" — the button unlocks once
+   * the first session's start time has passed.
    */
-  const getSeminarEndTime = (seminar) => {
+  const getSeminarStartTime = (seminar) => {
     if (!seminar) return null;
     const sessions = Array.isArray(seminar.sessions) && seminar.sessions.length > 0
       ? seminar.sessions
-      : [{ date: seminar.date, startTime: seminar.startTime, durationHours: seminar.durationHours }];
+      : [{ date: seminar.date, startTime: seminar.startTime }];
     let earliest = null;
     for (const sess of sessions) {
       if (!sess?.date) continue;
@@ -389,16 +389,28 @@ document.addEventListener('DOMContentLoaded', () => {
       const m = /^(\d{1,2}):(\d{2})$/.exec(String(sess.startTime || '').trim());
       if (m) {
         d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+      } else {
+        d.setHours(0, 0, 0, 0);
       }
       if (!earliest || d.getTime() < earliest.getTime()) earliest = d;
     }
     return earliest;
   };
+  // Back-compat alias (older call sites).
+  const getSeminarEndTime = getSeminarStartTime;
 
   const hasSeminarTimeElapsed = (seminar) => {
-    const start = getSeminarEndTime(seminar);
+    const start = getSeminarStartTime(seminar);
     if (!start) return true; // unknown — don't block
     return Date.now() >= start.getTime();
+  };
+
+  const formatSeminarStart = (seminar) => {
+    const d = getSeminarStartTime(seminar);
+    if (!d) return 'the scheduled start time';
+    const datePart = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' });
+    const timePart = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    return `${datePart} ${timePart}`;
   };
 
   /** Multi-day seminar: list each session date & time (Manage Seminars cards). */
@@ -1956,7 +1968,7 @@ document.addEventListener('DOMContentLoaded', () => {
         seminarHeldBtn.disabled = blocked;
         seminarHeldBtn.textContent = isHeld ? 'Unmark Held' : 'Mark as Held';
         seminarHeldBtn.title = blocked
-          ? `Available after the seminar start time (${formatDate(getSeminarEndTime(seminar))}).`
+          ? `Available once the seminar starts (${formatSeminarStart(seminar)}).`
           : '';
       }
       if (markAttendanceBtn) markAttendanceBtn.disabled = !isHeld;
@@ -2032,7 +2044,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const elapsed = hasSeminarTimeElapsed(seminar);
                 const disable = !seminar.isHeld && !elapsed;
                 const title = disable
-                  ? `Available after the seminar start time (${formatDate(getSeminarEndTime(seminar))}).`
+                  ? `Available once the seminar starts (${formatSeminarStart(seminar)}).`
                   : '';
                 return `<button class="btn secondary" type="button" data-seminar-held="${seminar._id}" style="${wideButtonStyle}" ${disable ? 'disabled aria-disabled="true"' : ''} title="${escapeHtml(title)}">${seminar.isHeld ? 'Unmark Held' : 'Mark as Held'}</button>`;
               })()}
@@ -2075,8 +2087,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!seminar) return;
         if (!seminar.isHeld && !hasSeminarTimeElapsed(seminar)) {
           if (seminarsStatusEl) {
-            const end = getSeminarEndTime(seminar);
-            seminarsStatusEl.textContent = `Cannot mark as held yet — seminar starts ${formatDate(end)}.`;
+            seminarsStatusEl.textContent = `Cannot mark as held yet — seminar starts ${formatSeminarStart(seminar)}.`;
           }
           return;
         }
@@ -2759,8 +2770,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const seminar = currentSeminars.find((item) => String(item._id) === String(attendanceModalState.seminarId));
     if (seminar && !seminar.isHeld && !hasSeminarTimeElapsed(seminar)) {
       if (seminarParticipantsStatusEl) {
-        const end = getSeminarEndTime(seminar);
-        seminarParticipantsStatusEl.textContent = `Cannot mark as held yet — seminar starts ${formatDate(end)}.`;
+        seminarParticipantsStatusEl.textContent = `Cannot mark as held yet — seminar starts ${formatSeminarStart(seminar)}.`;
       }
       return;
     }
