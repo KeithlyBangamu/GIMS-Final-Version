@@ -384,14 +384,27 @@ document.addEventListener('DOMContentLoaded', () => {
     let earliest = null;
     for (const sess of sessions) {
       if (!sess?.date) continue;
-      const d = new Date(sess.date);
-      if (Number.isNaN(d.getTime())) continue;
-      const m = /^(\d{1,2}):(\d{2})$/.exec(String(sess.startTime || '').trim());
-      if (m) {
-        d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+      // Use only the calendar-date portion. The stored value may include a
+      // time component (e.g. "2026-05-25T16:00:00.000Z") that would otherwise
+      // shift the day forward when interpreted in the browser's local zone.
+      const dateMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(sess.date));
+      let y, mo, da;
+      if (dateMatch) {
+        y = Number(dateMatch[1]);
+        mo = Number(dateMatch[2]);
+        da = Number(dateMatch[3]);
       } else {
-        d.setHours(0, 0, 0, 0);
+        const tmp = new Date(sess.date);
+        if (Number.isNaN(tmp.getTime())) continue;
+        y = tmp.getFullYear();
+        mo = tmp.getMonth() + 1;
+        da = tmp.getDate();
       }
+      const tm = /^(\d{1,2}):(\d{2})$/.exec(String(sess.startTime || '').trim());
+      const hh = tm ? Number(tm[1]) : 0;
+      const mm = tm ? Number(tm[2]) : 0;
+      const d = new Date(y, mo - 1, da, hh, mm, 0, 0);
+      if (Number.isNaN(d.getTime())) continue;
       if (!earliest || d.getTime() < earliest.getTime()) earliest = d;
     }
     return earliest;
