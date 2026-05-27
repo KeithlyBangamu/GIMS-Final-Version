@@ -1817,11 +1817,11 @@ document.addEventListener('DOMContentLoaded', () => {
         calState.edit.month = d < now ? now.getMonth() : d.getMonth();
       }
     } else {
-      // Single session — populate date/time/duration inputs
+      // Single session — populate date/time/endTime inputs
       const src = sessions.length === 1 ? sessions[0] : seminar;
       seminarEditForm.elements.date.value = String(src.date || seminar.date || '').slice(0, 10);
       seminarEditForm.elements.startTime.value = src.startTime || seminar.startTime || '';
-      seminarEditForm.elements.durationHours.value = src.durationHours || seminar.durationHours || 1;
+      seminarEditForm.elements.endTime.value = src.endTime || seminar.endTime || '';
       const dateInput = seminarEditForm.querySelector('input[name="date"]');
       if (dateInput) dateInput.min = getTodayDateInputValue();
     }
@@ -2904,7 +2904,19 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       payload.date = formBody.date;
       payload.startTime = formBody.startTime;
-      payload.durationHours = formBody.durationHours;
+      payload.endTime = formBody.endTime || '';
+      
+      // Calculate durationHours from startTime and endTime if endTime is provided
+      if (formBody.endTime && formBody.startTime) {
+        const [startH, startM] = formBody.startTime.split(':').map(Number);
+        const [endH, endM] = formBody.endTime.split(':').map(Number);
+        const startMins = startH * 60 + startM;
+        const endMins = endH * 60 + endM;
+        const durationMins = endMins - startMins;
+        payload.durationHours = durationMins > 0 ? durationMins / 60 : 1;
+      } else {
+        payload.durationHours = 1;
+      }
     }
 
     try {
@@ -2993,7 +3005,19 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       payload.date = body.date;
       payload.startTime = body.startTime;
-      payload.durationHours = body.durationHours;
+      payload.endTime = body.endTime || '';
+      
+      // Calculate durationHours from startTime and endTime if endTime is provided
+      if (body.endTime && body.startTime) {
+        const [startH, startM] = body.startTime.split(':').map(Number);
+        const [endH, endM] = body.endTime.split(':').map(Number);
+        const startMins = startH * 60 + startM;
+        const endMins = endH * 60 + endM;
+        const durationMins = endMins - startMins;
+        payload.durationHours = durationMins > 0 ? durationMins / 60 : 1;
+      } else {
+        payload.durationHours = 1;
+      }
     }
 
     try {
@@ -3827,11 +3851,28 @@ document.addEventListener('DOMContentLoaded', () => {
       if (pastSeminarStatus) pastSeminarStatus.textContent = 'Creating…';
       try {
         const fd = new FormData(pastSeminarForm);
+        const startTime = fd.get('startTime');
+        const endTime = fd.get('endTime');
+        
+        // Calculate durationHours from startTime and endTime if endTime is provided
+        let durationHours = 1;
+        if (endTime && startTime) {
+          const [startH, startM] = startTime.split(':').map(Number);
+          const [endH, endM] = endTime.split(':').map(Number);
+          const startMins = startH * 60 + startM;
+          const endMins = endH * 60 + endM;
+          const durationMins = endMins - startMins;
+          durationHours = durationMins > 0 ? durationMins / 60 : 1;
+        } else {
+          durationHours = Number(fd.get('durationHours')) || 1;
+        }
+        
         const payload = {
           title: fd.get('title'),
           date: fd.get('date'),
-          startTime: fd.get('startTime'),
-          durationHours: Number(fd.get('durationHours')) || 1,
+          startTime: startTime,
+          endTime: endTime || '',
+          durationHours: durationHours,
           mandatory: fd.get('mandatory') === 'true',
           capacity: Number(fd.get('capacity')) || 999,
           location: fd.get('location'),

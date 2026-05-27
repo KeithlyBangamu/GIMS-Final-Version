@@ -9,6 +9,7 @@ const SeminarSchema = new mongoose.Schema(
     resourcePerson: { type: String, trim: true, default: '' },
     date: { type: Date, required: true },
     startTime: { type: String, required: true }, // e.g. "14:00"
+    endTime: { type: String, default: '' }, // e.g. "15:00"
     durationHours: { type: Number, required: true, min: 0.5 },
     mandatory: { type: Boolean, default: false },
     capacity: { type: Number, required: true, min: 1 },
@@ -18,6 +19,7 @@ const SeminarSchema = new mongoose.Schema(
       {
         date: { type: Date, required: true },
         startTime: { type: String, required: true },
+        endTime: { type: String, default: '' },
         durationHours: { type: Number, required: true, min: 0.5 },
         isHeld: { type: Boolean, default: false },
         heldAt: { type: Date },

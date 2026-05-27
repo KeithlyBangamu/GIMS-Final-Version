@@ -607,13 +607,13 @@ const buildValidatedSessions = (rawSessions, allowPast = false) => {
   const sessions = [];
   for (const s of rawSessions) {
     if (!s.date || !s.startTime || !s.durationHours) {
-      return { error: 'Each session requires a date, start time, and duration.' };
+      return { error: 'Each session requires a date and start time.' };
     }
     const d = parseDateOnly(s.date);
     if (!d) return { error: `Invalid session date: ${s.date}` };
     d.setHours(0, 0, 0, 0);
     if (!allowPast && d < today) return { error: 'Session dates cannot be in the past.' };
-    sessions.push({ ...s, date: d, durationHours: Number(s.durationHours) });
+    sessions.push({ ...s, date: d, durationHours: Number(s.durationHours), endTime: s.endTime || '' });
   }
   sessions.sort((a, b) => new Date(a.date) - new Date(b.date));
   return { sessions };
@@ -639,7 +639,7 @@ router.post('/seminars', authMiddleware, async (req, res, next) => {
     const rawSessions =
       Array.isArray(req.body.sessions) && req.body.sessions.length > 0
         ? req.body.sessions
-        : [{ date: req.body.date, startTime: req.body.startTime, durationHours: req.body.durationHours }];
+        : [{ date: req.body.date, startTime: req.body.startTime, endTime: req.body.endTime || '', durationHours: req.body.durationHours }];
 
     const { sessions, error } = buildValidatedSessions(rawSessions);
     if (error) return res.status(400).json({ message: error });
@@ -654,6 +654,7 @@ router.post('/seminars', authMiddleware, async (req, res, next) => {
       resourcePerson: String(resourcePerson || '').trim(),
       date: sessions[0].date,
       startTime: sessions[0].startTime,
+      endTime: sessions[0].endTime || '',
       durationHours: sessions[0].durationHours,
       sessions,
       mandatory: String(mandatory).toLowerCase() === 'true',
@@ -1057,24 +1058,7 @@ router.post('/seminars/:id/held', authMiddleware, async (req, res, next) => {
     const desired = (req.body && (req.body.isHeld ?? req.body.held));
     const targetHeld = typeof desired === 'boolean' ? desired : true;
     if (targetHeld && !seminar.isHeld) {
-      // Guard: cannot mark held until the seminar's start time has passed.
-      const sessions = Array.isArray(seminar.sessions) && seminar.sessions.length > 0
-        ? seminar.sessions
-        : [{ date: seminar.date, startTime: seminar.startTime, durationHours: seminar.durationHours }];
-      let earliestStart = null;
-      for (const sess of sessions) {
-        if (!sess?.date) continue;
-        const d = new Date(sess.date);
-        if (Number.isNaN(d.getTime())) continue;
-        const m = /^(\d{1,2}):(\d{2})$/.exec(String(sess.startTime || '').trim());
-        if (m) d.setHours(Number(m[1]), Number(m[2]), 0, 0);
-        if (!earliestStart || d.getTime() < earliestStart.getTime()) earliestStart = d;
-      }
-      if (earliestStart && Date.now() < earliestStart.getTime()) {
-        return res.status(400).json({
-          message: `Cannot mark as held yet — seminar starts ${earliestStart.toLocaleString()}.`,
-        });
-      }
+      // Allow marking as held anytime
       seminar.isHeld = true;
       seminar.heldAt = new Date();
       await seminar.save();
@@ -1272,7 +1256,7 @@ router.put('/seminars/:id', authMiddleware, async (req, res, next) => {
     const rawSessions =
       Array.isArray(req.body.sessions) && req.body.sessions.length > 0
         ? req.body.sessions
-        : [{ date: req.body.date, startTime: req.body.startTime, durationHours: req.body.durationHours }];
+        : [{ date: req.body.date, startTime: req.body.startTime, endTime: req.body.endTime || '', durationHours: req.body.durationHours }];
 
     // Build existing session map to preserve isHeld/heldAt
     const existingMap = new Map((seminar.sessions || []).map((s) => [String(s._id), s]));
@@ -1286,7 +1270,7 @@ router.put('/seminars/:id', authMiddleware, async (req, res, next) => {
         continue;
       }
       if (!s.date || !s.startTime || !s.durationHours) {
-        return res.status(400).json({ message: 'Each session requires a date, start time, and duration.' });
+        return res.status(400).json({ message: 'Each session requires a date and start time.' });
       }
       const d = parseDateOnly(s.date);
       if (!d) return res.status(400).json({ message: `Invalid session date: ${s.date}` });
@@ -1295,9 +1279,9 @@ router.put('/seminars/:id', authMiddleware, async (req, res, next) => {
       d.setHours(0, 0, 0, 0);
       if (d < today) return res.status(400).json({ message: 'Session dates cannot be in the past.' });
       if (existing) {
-        newSessions.push({ ...existing.toObject(), date: d, startTime: s.startTime, durationHours: Number(s.durationHours) });
+        newSessions.push({ ...existing.toObject(), date: d, startTime: s.startTime, endTime: s.endTime || '', durationHours: Number(s.durationHours) });
       } else {
-        newSessions.push({ date: d, startTime: s.startTime, durationHours: Number(s.durationHours) });
+        newSessions.push({ date: d, startTime: s.startTime, endTime: s.endTime || '', durationHours: Number(s.durationHours) });
       }
     }
     newSessions.sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -1309,6 +1293,7 @@ router.put('/seminars/:id', authMiddleware, async (req, res, next) => {
     seminar.sessions = newSessions;
     seminar.date = newSessions[0]?.date || seminar.date;
     seminar.startTime = newSessions[0]?.startTime || seminar.startTime;
+    seminar.endTime = newSessions[0]?.endTime || '';
     seminar.durationHours = newSessions[0]?.durationHours || seminar.durationHours;
     seminar.mandatory = String(mandatory).toLowerCase() === 'true';
     seminar.capacity = Number(capacity);
