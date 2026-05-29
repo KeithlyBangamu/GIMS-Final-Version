@@ -890,4 +890,46 @@ router.get('/articles/:id', async (req, res, next) => {
   }
 });
 
+// Unregister/Cancel registration from a seminar (employees can only cancel pre-registered status)
+router.delete('/registrations/:registrationId', async (req, res, next) => {
+  try {
+    const registration = await Registration.findOne({
+      _id: req.params.registrationId,
+      employeeID: req.user.id,
+    });
+
+    if (!registration) {
+      return res.status(404).json({ message: 'Registration not found' });
+    }
+
+    // Only allow cancellation if status is "pre-registered"
+    if (registration.status !== 'pre-registered') {
+      return res.status(400).json({
+        message: `Cannot cancel registration with status "${registration.status}". Only pre-registered seminars can be cancelled.`,
+      });
+    }
+
+    // Get the seminar to verify it exists
+    const seminar = await Seminar.findById(registration.seminarID);
+    if (!seminar) {
+      return res.status(404).json({ message: 'Seminar not found' });
+    }
+
+    // Remove employee from seminar's registered employees list
+    await Seminar.findByIdAndUpdate(
+      registration.seminarID,
+      { $pull: { registeredEmployees: req.user.id } }
+    );
+
+    // Delete the registration
+    await Registration.findByIdAndDelete(req.params.registrationId);
+
+    res.json({
+      message: `You have successfully cancelled your registration for "${seminar.title}".`,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
