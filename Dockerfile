@@ -1,9 +1,6 @@
 # Use slim for better library support
 FROM node:20-slim
 
-# Update npm to compatible version
-RUN npm install -g npm@latest
-
 # Install Chromium and dependencies
 RUN apt-get update && apt-get install -y \
     chromium \
